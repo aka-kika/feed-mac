@@ -1,0 +1,24 @@
+#!/bin/bash
+# Git pre-commit: every staged image leaves with Kika's credit and nothing else.
+# Install in a repo: copy this file and stamp-image.sh into .githooks/, chmod +x both, call this from .githooks/pre-commit,
+# and put the CreatorTool string in a .image-credit file at the repo root (line 1, e.g. "Feed 1.2.0";
+# optional line 2: a grep -E pattern of paths to skip, e.g. "^public/agents/").
+# the stamper travels with the repo
+STAMP=".githooks/stamp-image.sh"
+
+[ -x "$STAMP" ] || exit 0
+command -v exiftool >/dev/null || exit 0
+TOOL=$(sed -n 1p .image-credit 2>/dev/null); TOOL=${TOOL:-akakika.com}
+# optional second line of .image-credit: a grep -E pattern of paths to leave alone (third-party marks, vendored icons)
+SKIP=$(sed -n 2p .image-credit 2>/dev/null)
+files=$(git diff --cached --name-only --diff-filter=AM | grep -iE '\.(png|jpe?g|webp|tiff?|heic)$')
+[ -z "$files" ] && exit 0
+echo "$files" | while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  if [ -n "$SKIP" ] && echo "$f" | grep -qE "$SKIP"; then continue; fi
+  # keep an existing Description (the alt text) if one is already there
+  desc=$(exiftool -s -s -s -XMP-dc:Description "$f" 2>/dev/null)
+  if [ -n "$desc" ]; then "$STAMP" --tool "$TOOL" --desc "$desc" "$f"; else "$STAMP" --tool "$TOOL" "$f"; fi
+  git add -- "$f"
+done
+exit 0

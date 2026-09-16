@@ -1,0 +1,4 @@
+#!/bin/sh
+# Every staged image leaves with the credit and no generator metadata. Install: git config core.hooksPath .githooks
+[ -x .githooks/pre-commit-images ] && .githooks/pre-commit-images
+exit 0

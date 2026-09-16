@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+*.log
+.grok/
+.superpowers/
+docs/superpowers/
+NOTES.md
+GATE.md
+release.env

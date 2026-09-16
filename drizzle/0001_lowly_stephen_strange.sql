@@ -1,0 +1,1 @@
+ALTER TABLE `reports` ADD `archived` integer DEFAULT 0 NOT NULL;
