@@ -63,7 +63,7 @@ export async function publish(key: Publisher, raw: PublishInput, sample = false)
     for (const file of files) statements.push(db().prepare('INSERT INTO attachments (id, report_id, name, type, size, object_key) VALUES (?, ?, ?, ?, ?, ?)').bind(file.id, id, file.name, file.type, file.bytes.length, `${id}/${file.id}`));
     if (!sample) statements.push(db().prepare('UPDATE agent_keys SET last_used_at = ? WHERE id = ?').bind(now, key.id));
     await db().batch(statements);
-    if (!sample) { logPublish(key, data.run_id, `created id=${id}`); notify({ title: data.title, message: `${key.source} · ${data.routine}`, click: `${publicOrigin ?? ''}/?report=${id}` }); }
+    if (!sample) { logPublish(key, data.run_id, `created id=${id}`); notify({ title: `${key.source} · ${data.title}`, message: data.routine, click: `${publicOrigin ?? ''}/?report=${id}` }); }
     return { id, duplicate: false };
   } catch (error) {
     for (const path of uploaded) { try { await bucket().delete(path); } catch { console.error('Attachment cleanup failed'); } }

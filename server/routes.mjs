@@ -11561,7 +11561,7 @@ async function publish(key, raw, sample = false) {
     await db().batch(statements);
     if (!sample) {
       logPublish(key, data.run_id, `created id=${id}`);
-      notify({ title: data.title, message: `${key.source} \xB7 ${data.routine}`, click: `${publicOrigin ?? ""}/?report=${id}` });
+      notify({ title: `${key.source} \xB7 ${data.title}`, message: data.routine, click: `${publicOrigin ?? ""}/?report=${id}` });
     }
     return { id, duplicate: false };
   } catch (error2) {
