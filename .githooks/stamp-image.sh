@@ -29,8 +29,13 @@ for f in "$@"; do
   hits=$(exiftool -s -s -s -Software -CreatorTool -Comment -UserComment -XMP-xmp:all -XMP-xmpMM:all -XMP-iptcExt:all -PNG:Software -PNG:Comment "$f" 2>/dev/null \
     | grep -iE 'midjourney|openai|chatgpt|dall.?e|stable ?diffusion|gemini|imagen|firefly|c2pa|generated|ai-generated|grok|minimax|claude|anthropic|photoshop|canva' | head -3)
   exiftool -q -overwrite_original -all= --icc_profile:all "$f" 2>/dev/null
-  t="${TITLE:-$(basename "${f%.*}" | sed 's/[-_]/ /g')}"
-  args=(-q -overwrite_original -XMP-dc:Creator="Kika (akakika)" -XMP-dc:Rights="Copyright $YEAR Kika, akakika.com" \
+  # Title: --title, else the file name; a generic name (screenshot-01, img_1234) falls back to the folder name
+  base=$(basename "${f%.*}")
+  if echo "$base" | grep -qiE '^(screen ?shot|screenshot|image|img|photo|pic|untitled|capture|shot)[-_ ]?[0-9]*$'; then
+    base="$(basename "$(dirname "$f")") ${base##*[-_ ]}"
+  fi
+  t="${TITLE:-$(echo "$base" | sed 's/[-_]/ /g')}"
+  args=(-q -overwrite_original -XMP-dc:Creator="Kika (@akakikaaa)" -XMP-dc:Rights="Copyright $YEAR Kika, akakika.com" \
         -XMP-photoshop:Source="akakika.com" -XMP-photoshop:Credit="akakika.com" -XMP-xmp:CreatorTool="$TOOL" -XMP-dc:Title="$t")
   [ -n "$DESC" ] && args+=(-XMP-dc:Description="$DESC")
   exiftool "${args[@]}" "$f" 2>/dev/null
