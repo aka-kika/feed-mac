@@ -6,7 +6,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -4144,13 +4148,14 @@ var require_fast_uri = __commonJS({
         if (!malformedIPLiteral) {
           malformedHost = canonicalizeHost(parsed, options, schemeHandler, isIP);
         }
-        if (!schemeHandler || schemeHandler && !schemeHandler.skipNormalize) {
-          if (uri.indexOf("%") !== -1) {
-            if (parsed.host !== void 0 && !malformedIPLiteral) {
-              const host = isIP ? parsed.host : normalizePercentEncoding(parsed.host, true);
-              parsed.host = reescapeHostDelimiters(host, isIP);
-            }
+        if (uri.indexOf("%") !== -1 && parsed.host !== void 0 && !malformedIPLiteral) {
+          let host = isIP ? parsed.host : normalizePercentEncoding(parsed.host, true);
+          if (!isIP) {
+            host = normalizePercentEncoding(host.toLowerCase());
           }
+          parsed.host = reescapeHostDelimiters(host, isIP);
+        }
+        if (!schemeHandler || schemeHandler && !schemeHandler.skipNormalize) {
           if (parsed.path) {
             parsed.path = normalizePathEncoding(parsed.path);
           }
@@ -7378,6 +7383,7 @@ Only confirm connection after the server returns a report ID (HTTP 200/201, or a
 - title: a concise report title.
 - markdown: the complete report, including headings, links, lists, tables and fenced code where useful.
 - published_at: optional ISO timestamp with timezone.
+- notify: optional short text for the phone notification (up to 240 characters); without it the notification shows the routine name.
 - attachments: optional array of { name, type, base64 }; up to 5 files, 2 MB per file and 5 MB total. Entire request limit: 8 MB.
 Do not pass a source field; the key already identifies you. Keep failed or partial results clearly labelled. Never include credentials in Markdown or attachments.
 
@@ -11437,6 +11443,7 @@ var publishShape = {
   title: external_exports.string().trim().min(1).max(240),
   markdown: external_exports.string().min(1).max(5e5),
   published_at: external_exports.string().datetime({ offset: true }).optional(),
+  notify: external_exports.string().trim().min(1).max(240).optional(),
   attachments: external_exports.array(external_exports.object({ name: external_exports.string().min(1).max(160).refine((s) => !/[\x00-\x1f/\\]/.test(s), "Use a filename without path separators"), type: external_exports.string().max(100).default("application/octet-stream"), base64: external_exports.string().max(28e5) })).max(5).default([])
 };
 var publishSchema = external_exports.object(publishShape).strict();
@@ -11561,7 +11568,7 @@ async function publish(key, raw, sample = false) {
     await db().batch(statements);
     if (!sample) {
       logPublish(key, data.run_id, `created id=${id}`);
-      notify({ title: `${key.source} \xB7 ${data.title}`, message: data.routine, click: `${publicOrigin ?? ""}/?report=${id}` });
+      notify({ title: `${key.source} \xB7 ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ""}/?report=${id}` });
     }
     return { id, duplicate: false };
   } catch (error2) {

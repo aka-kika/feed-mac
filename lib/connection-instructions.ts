@@ -42,6 +42,7 @@ Only confirm connection after the server returns a report ID (HTTP 200/201, or a
 - title: a concise report title.
 - markdown: the complete report, including headings, links, lists, tables and fenced code where useful.
 - published_at: optional ISO timestamp with timezone.
+- notify: optional short text for the phone notification (up to 240 characters); without it the notification shows the routine name.
 - attachments: optional array of { name, type, base64 }; up to 5 files, 2 MB per file and 5 MB total. Entire request limit: 8 MB.
 Do not pass a source field; the key already identifies you. Keep failed or partial results clearly labelled. Never include credentials in Markdown or attachments.
 

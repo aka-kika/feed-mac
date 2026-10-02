@@ -62,7 +62,7 @@ Authorization: Bearer <agent key>
 → { "id": "5728d8e6-…", "duplicate": false, "url": "http://127.0.0.1:4318/?report=5728d8e6-…" }
 ```
 
-The same call is the MCP tool `publish_report` at `/api/mcp` over Streamable HTTP. Required: `run_id`, `routine`, `title`, `markdown`. Optional: `published_at` (ISO with timezone) and up to five `attachments` as `{ name, type, base64 }`, 2 MB each, 5 MB total, 8 MB per request.
+The same call is the MCP tool `publish_report` at `/api/mcp` over Streamable HTTP. Required: `run_id`, `routine`, `title`, `markdown`. Optional: `published_at` (ISO with timezone), `notify` (short text for the phone notification, up to 240 characters; without it the notification shows the routine name) and up to five `attachments` as `{ name, type, base64 }`, 2 MB each, 5 MB total, 8 MB per request.
 
 Retrying the same payload returns the same report. A different body under the same `run_id` is a `409`. Retry on network errors, `429` and `5xx`, at most three times with backoff. Stop on `401`, `403`, `409`. Every attempt is one line in `logs/server.log`.
 
