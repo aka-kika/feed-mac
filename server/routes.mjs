@@ -11448,6 +11448,10 @@ var publishShape = {
 };
 var publishSchema = external_exports.object(publishShape).strict();
 
+// lib/kinds.ts
+var REPORT_WORDS = ["scribe", "wrap", "sync", "health", "check", "audit", "test", "connection", "maintenance", "trail", "setup", "review", "retrospective", "smoke", "status", "backup"];
+var KIND_SQL = `coalesce((SELECT k.kind FROM routine_kinds k WHERE k.owner = r.owner AND k.source = r.source AND k.routine = r.routine), CASE WHEN ${REPORT_WORDS.map((w) => `lower(r.routine) LIKE '%${w}%'`).join(" OR ")} THEN 'report' ELSE 'news' END)`;
+
 // lib/server.ts
 var HttpError = class extends Error {
   constructor(status, message) {
@@ -11566,9 +11570,10 @@ async function publish(key, raw, sample = false) {
     for (const file of files) statements.push(db().prepare("INSERT INTO attachments (id, report_id, name, type, size, object_key) VALUES (?, ?, ?, ?, ?, ?)").bind(file.id, id, file.name, file.type, file.bytes.length, `${id}/${file.id}`));
     if (!sample) statements.push(db().prepare("UPDATE agent_keys SET last_used_at = ? WHERE id = ?").bind(now, key.id));
     await db().batch(statements);
+    const quiet = !sample && (await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first())?.kind === "report";
     if (!sample) {
-      logPublish(key, data.run_id, `created id=${id}`);
-      notify({ title: `${key.source} \xB7 ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ""}/?report=${id}` });
+      logPublish(key, data.run_id, `created id=${id}${quiet ? " quiet" : ""}`);
+      if (!quiet) notify({ title: `${key.source} \xB7 ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ""}/?report=${id}` });
     }
     return { id, duplicate: false };
   } catch (error2) {
@@ -11630,6 +11635,7 @@ async function handle(request, context) {
         where.push("r.routine = ?");
         args.push(routine);
       }
+      if (view === "news" || view === "reports") where.push(`${KIND_SQL} = '${view === "news" ? "news" : "report"}'`);
       if (view === "unread") where.push("r.is_read = 0");
       if (view === "favourites") where.push("r.favourite = 1");
       if (view === "commented") where.push("EXISTS (SELECT 1 FROM comments c WHERE c.report_id = r.id AND c.owner = r.owner)");
@@ -11649,20 +11655,21 @@ async function handle(request, context) {
           throw new HttpError(400, "Invalid page cursor.");
         }
       }
-      const results = await db().prepare(`SELECT r.id, r.source, r.routine, r.title, substr(r.markdown, 1, 320) AS markdown, r.published_at, r.received_at, r.favourite, r.archived, r.is_read, r.sample, (SELECT count(*) FROM comments c WHERE c.report_id = r.id) AS comment_count FROM reports r WHERE ${where.join(" AND ")} ORDER BY r.published_at DESC, r.id DESC LIMIT 41`).bind(...args).all();
+      const results = await db().prepare(`SELECT r.id, r.source, r.routine, r.title, substr(r.markdown, 1, 320) AS markdown, r.published_at, r.received_at, r.favourite, r.archived, r.is_read, r.sample, ${KIND_SQL} AS kind, (SELECT count(*) FROM comments c WHERE c.report_id = r.id) AS comment_count FROM reports r WHERE ${where.join(" AND ")} ORDER BY r.published_at DESC, r.id DESC LIMIT 41`).bind(...args).all();
       const more = results.results.length > 40, items = results.results.slice(0, 40), last = items.at(-1);
-      const routines = await db().prepare("SELECT DISTINCT source, routine FROM reports WHERE owner = ? AND sample = 0 ORDER BY routine").bind(user).all();
-      const counts = await db().prepare("SELECT count(*) AS total, coalesce(sum(CASE WHEN is_read = 0 AND archived = 0 THEN 1 ELSE 0 END),0) AS unread FROM reports WHERE owner = ? AND sample = 0").bind(user).first();
+      const routines = await db().prepare(`SELECT DISTINCT r.source, r.routine, ${KIND_SQL} AS kind FROM reports r WHERE r.owner = ? AND r.sample = 0 ORDER BY r.routine`).bind(user).all();
+      const counts = await db().prepare(`SELECT count(*) AS total, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 THEN 1 ELSE 0 END),0) AS unread, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'news' THEN 1 ELSE 0 END),0) AS unread_news, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'report' THEN 1 ELSE 0 END),0) AS unread_reports FROM reports r WHERE r.owner = ? AND r.sample = 0`).bind(user).first();
       return json({ reports: items, routines: routines.results, counts, cursor: more && last ? btoa(JSON.stringify([last.published_at, last.id])) : null });
     }
     if (route === "reports" && id && method === "GET") {
       const report = await ownedReport(id, user);
+      const { kind } = await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first();
       if (report.sample) throw new HttpError(404, "Report not found.");
       if (url.searchParams.get("download") === "markdown") return new Response(String(report.markdown), { headers: { "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="report.md"; filename*=UTF-8''${encodeURIComponent(String(report.title).replace(/[\x00-\x1f/\\]/g, "-").slice(0, 100) + ".md")}`, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } });
       const comments = await db().prepare("SELECT id, body, created_at FROM comments WHERE report_id = ? AND owner = ? ORDER BY created_at, id").bind(id, user).all();
       const attachments = await db().prepare("SELECT id, name, type, size FROM attachments WHERE report_id = ?").bind(id).all();
       const { owner: _owner, payload_hash: _hash, ...safe } = report;
-      return json({ report: { ...safe, attachments: attachments.results, comment_count: comments.results.length }, comments: comments.results });
+      return json({ report: { ...safe, kind, attachments: attachments.results, comment_count: comments.results.length }, comments: comments.results });
     }
     if (route === "reports" && id && method === "PATCH") {
       await ownedReport(id, user);
@@ -11670,6 +11677,11 @@ async function handle(request, context) {
       const fields = Object.entries(data);
       if (!fields.length) throw new HttpError(400, "Choose a change to save.");
       await db().prepare(`UPDATE reports SET ${fields.map(([key]) => `${key} = ?`).join(", ")} WHERE id = ? AND owner = ?`).bind(...fields.map(([, v]) => v ? 1 : 0), id, user).run();
+      return json({ saved: true });
+    }
+    if (route === "routine-kinds" && method === "POST") {
+      const data = external_exports.object({ source: external_exports.string().min(1).max(80), routine: publishShape.routine, kind: external_exports.enum(["news", "report"]) }).strict().parse(await body(request, 2e3));
+      await db().prepare("INSERT INTO routine_kinds (owner, source, routine, kind) VALUES (?, ?, ?, ?) ON CONFLICT(owner, source, routine) DO UPDATE SET kind = excluded.kind").bind(user, data.source, data.routine, data.kind).run();
       return json({ saved: true });
     }
     if (route === "comments" && method === "POST") {

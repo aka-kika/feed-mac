@@ -51,6 +51,19 @@ try{
  // Exercise actual bundled MCP over HTTP without relying on an installed client.
  const mcp=await req('/api/mcp','POST',{jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'test',version:'1'}}},{...agent,Accept:'application/json, text/event-stream'});assert.equal(mcp.status,200);assert.ok((await mcp.json()).result.serverInfo);
  const call=await req('/api/mcp','POST',{jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'publish_report',arguments:{run_id:'mcp-check',routine:'MCP test',title:'MCP report',markdown:'Full MCP content'}}},{...agent,Accept:'application/json, text/event-stream'});assert.equal(call.status,200);assert.ok(JSON.parse((await call.json()).result.content[0].text).id);
+ // News and Reports: a routine named like a check starts in Reports, anything else in News, and moving a routine sticks.
+ assert.equal((await req('/api/publish','POST',{run_id:'news-1',routine:'AI news digest',title:'News',markdown:'Worth reading'},agent)).status,201);
+ assert.match(logs,/run_id=mcp-check outcome=created id=\S+ quiet/);assert.match(logs,/run_id=news-1 outcome=created id=\S+\n/);
+ const list=async view=>(await(await req('/api/reports?view='+view,'GET',null,owner)).json());
+ let news=await list('news'),reports=await list('reports');
+ assert.deepEqual(news.reports.map(x=>x.title),['News']);assert.deepEqual(reports.reports.map(x=>x.title),['MCP report']);assert.equal(news.reports[0].kind,'news');
+ assert.equal(news.counts.unread_news,1);assert.equal(news.counts.unread_reports,1);
+ assert.equal((await req('/api/routine-kinds','POST',{source:'aka',routine:'AI news digest',kind:'report'},{...owner,Origin:'https://evil.test'})).status,403);
+ assert.equal((await req('/api/routine-kinds','POST',{source:'aka',routine:'AI news digest',kind:'other'},owner)).status,400);
+ assert.equal((await req('/api/routine-kinds','POST',{source:'aka',routine:'AI news digest',kind:'report'},owner)).status,200);
+ assert.equal((await list('news')).reports.length,0);assert.equal((await list('reports')).reports.length,2);
+ assert.equal((await req('/api/routine-kinds','POST',{source:'aka',routine:'AI news digest',kind:'news'},owner)).status,200);
+ const newsId=(await list('news')).reports[0].id;assert.equal((await(await req('/api/reports/'+newsId,'GET',null,owner)).json()).report.kind,'news');
  await stop();await start();detail=await(await req('/api/reports/'+report.id,'GET',null,owner)).json();assert.equal(detail.report.markdown,payload.markdown);assert.equal(detail.report.archived,1);assert.equal(detail.comments[0].body,comment.body);await stop();
  const migration=mkdtempSync(join(tmpdir(),'feed-import-test-'));
  try{

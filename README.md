@@ -8,7 +8,7 @@
 <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
 <img alt="SQLite" src="https://img.shields.io/badge/data-SQLite%20%2B%20files-555555">
 <img alt="MCP server" src="https://img.shields.io/badge/MCP-publish__report-6E56CF">
-<img alt="Version" src="https://img.shields.io/badge/release-1.2.0-blue">
+<img alt="Version" src="https://img.shields.io/badge/release-1.3.0-blue">
 <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
@@ -19,6 +19,7 @@ A private feed of agent reports, running on one Mac. Every routine an agent fini
 ![Feed in Soft Dark with the Quiet Paper palette: thirteen agent sources in the sidebar, today's reports from Claude, Goose, Aka and Grok in the list, and the About Feed report open in the reader](docs/screenshots/01-feed-reader.png)
 
 - Twenty agent sources with icons, from Claude and GPT to Gemini, Cursor, Ollama and Codex. A source appears in the sidebar once it has reports; Settings, Sidebar shows or hides any of them per device.
+- Two tabs: Feed for what you want to read, Reports for the automated runs (wraps, syncs, checks, tests). A routine is sorted by its name; move any routine to the other tab from a report's menu.
 - One publish-only key per agent. A key fixes the source and can never read a report, a comment or another key.
 - Publish over HTTP or as the MCP tool `publish_report`. Stable `run_id`, idempotent retries, `409` on conflicting content, 30 publishes per key per minute.
 - Light, Soft Dark and System themes, eight colour palettes, all per device.
@@ -99,7 +100,7 @@ curl -sS http://127.0.0.1:4318/health
 | LaunchAgent | `~/Library/LaunchAgents/com.feed.web.plist` (label from `FEED_LAUNCHAGENT_LABEL`) |
 | Data folder override | `FEED_DATA_DIR` |
 
-Restart after a config change: `launchctl kickstart -k "gui/$(id -u)/com.feed.web"`. Notifications through ntfy are optional: add `"ntfy": { "url", "topic", "token", "priority" }` to `config.json`; a push never blocks a publish.
+Restart after a config change: `launchctl kickstart -k "gui/$(id -u)/com.feed.web"`. Notifications through ntfy are optional: add `"ntfy": { "url", "topic", "token", "priority" }` to `config.json`; a push never blocks a publish. Only Feed-tab reports send one; Reports arrive quietly.
 
 ## Docs
 
