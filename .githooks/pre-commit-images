@@ -4,15 +4,20 @@
 # and put the CreatorTool string in a .image-credit file at the repo root (line 1, e.g. "Feed 1.2.0";
 # optional line 2: a grep -E pattern of paths to skip, e.g. "^public/agents/").
 # the stamper travels with the repo; fall back to the shared copy on the author's Mac
+# Also run for every repo on Kika's Mac by the global hooks in ~/_KIKA_MAIN/_INFRA/git-hooks/ (git config --global core.hooksPath).
+# "off" on line 1 of .image-credit turns it off for one repo.
 STAMP=".githooks/stamp-image.sh"
 [ -x "$STAMP" ] || STAMP="$HOME/_KIKA_MAIN/_INFRA/scripts/stamp-image.sh"
-[ -x "$STAMP" ] || exit 0
-command -v exiftool >/dev/null || exit 0
-TOOL=$(sed -n 1p .image-credit 2>/dev/null); TOOL=${TOOL:-akakika.com}
+TOOL=$(sed -n 1p .image-credit 2>/dev/null); TOOL=${TOOL:-$(basename "$(git rev-parse --show-toplevel)")}
+[ "$TOOL" = "off" ] && exit 0
 # optional second line of .image-credit: a grep -E pattern of paths to leave alone (third-party marks, vendored icons)
 SKIP=$(sed -n 2p .image-credit 2>/dev/null)
 files=$(git diff --cached --name-only --diff-filter=AMR | grep -iE '\.(png|jpe?g|webp|tiff?|heic)$')
 [ -z "$files" ] && exit 0
+# images are staged: without the stamper or a working exiftool they must not leave
+if [ ! -x "$STAMP" ]; then echo "pre-commit: images staged but no stamp-image.sh found; nothing committed." >&2; exit 1; fi
+ok=""; for c in /opt/homebrew/bin/exiftool "$(command -v exiftool 2>/dev/null)"; do [ -n "$c" ] && [ -x "$c" ] && "$c" -ver >/dev/null 2>&1 && ok=1 && break; done
+if [ -z "$ok" ]; then echo "pre-commit: images staged but exiftool does not work (brew install exiftool); nothing committed." >&2; exit 1; fi
 # A new image needs a name that says what it shows: search engines and people read file names.
 generic='^(screen ?shot|screenshot|image|img|photo|pic|untitled|capture|shot)[-_ ]?[0-9]*$'
 bad=$(git diff --cached --name-only --diff-filter=AR | grep -iE '\.(png|jpe?g|webp|tiff?|heic)$' | while IFS= read -r f; do
@@ -47,7 +52,8 @@ for f in glob.glob("public/**/*.html", recursive=True) + glob.glob("src/**/*.jso
 PY
 }
 
-echo "$files" | while IFS= read -r f; do
+# a failed stamp stops the commit (the loop runs in a subshell, so its exit code is what counts)
+echo "$files" | { fail=0; while IFS= read -r f; do
   [ -f "$f" ] || continue
   if [ -n "$SKIP" ] && echo "$f" | grep -qE "$SKIP"; then continue; fi
   # Description = the alt text: the one already in the file, else the one the site uses for it.
@@ -56,10 +62,10 @@ echo "$files" | while IFS= read -r f; do
   [ -z "$desc" ] && desc=$(alt_for "$f")
   if [ -n "$desc" ]; then
     title=$(printf '%s' "$desc" | sed 's/[:.;].*//' | cut -c1-80)
-    "$STAMP" --tool "$TOOL" --title "$title" --desc "$desc" "$f"
+    "$STAMP" --tool "$TOOL" --title "$title" --desc "$desc" "$f" || { fail=1; continue; }
   else
-    "$STAMP" --tool "$TOOL" "$f"
+    "$STAMP" --tool "$TOOL" "$f" || { fail=1; continue; }
   fi
   git add -- "$f"
-done
+done; exit $fail; } || { echo "pre-commit: an image could not be stamped (see above); nothing committed." >&2; exit 1; }
 exit 0
