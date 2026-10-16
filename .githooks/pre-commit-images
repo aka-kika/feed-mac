@@ -30,16 +30,18 @@ if [ -n "$bad" ]; then
   exit 1
 fi
 
-# The alt text the site already uses for an image: <img src=... alt=...> in HTML, or ![alt](src) in Markdown/JSON.
+# The alt text the repo already uses for an image: <img src=... alt=...> in HTML or Markdown, or ![alt](src),
+# by its site path (/x.png for public/x.png) or its repo path (docs/x.png, ./docs/x.png, as a README writes it).
 alt_for() {
   command -v python3 >/dev/null || return 0
-  python3 - "/${1#public/}" <<'PY'
+  python3 - "/${1#public/}" "$1" <<'PY'
 import glob, html, re, sys
-web = re.escape(sys.argv[1])
-pats = [re.compile(r'<img\b[^>]*\bsrc="' + web + r'"[^>]*\balt="([^"]+)"'),
-        re.compile(r'<img\b[^>]*\balt="([^"]+)"[^>]*\bsrc="' + web + r'"'),
-        re.compile(r'!\[([^\]]+)\]\(' + web + r'\)')]
-for f in glob.glob("public/**/*.html", recursive=True) + glob.glob("src/**/*.json", recursive=True) + glob.glob("blogs/**/*.md", recursive=True):
+src = "(?:" + "|".join(re.escape(s) for s in {sys.argv[1], sys.argv[2], "./" + sys.argv[2]}) + ")"
+pats = [re.compile(r'<img\b[^>]*\bsrc="' + src + r'"[^>]*\balt="([^"]+)"'),
+        re.compile(r'<img\b[^>]*\balt="([^"]+)"[^>]*\bsrc="' + src + r'"'),
+        re.compile(r'!\[([^\]]+)\]\(' + src + r'(?:\s+"[^"]*")?\)')]
+for f in (glob.glob("public/**/*.html", recursive=True) + glob.glob("src/**/*.json", recursive=True)
+          + glob.glob("blogs/**/*.md", recursive=True) + glob.glob("*.md") + glob.glob("docs/**/*.md", recursive=True)):
     try:
         s = open(f, encoding="utf-8").read()
     except Exception:
