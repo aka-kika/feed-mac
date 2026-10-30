@@ -5,7 +5,7 @@ import {createHmac,timingSafeEqual,scrypt as scryptCallback} from 'node:crypto';
 import {promisify} from 'node:util';
 import {Readable} from 'node:stream';
 import {text as readBody} from 'node:stream/consumers';
-import {auth,dataDir} from './storage.mjs';
+import {auth,dataDir,door} from './storage.mjs';
 import {api,mcp} from './routes.mjs';
 const scrypt=promisify(scryptCallback);
 const config=JSON.parse(readFileSync(join(dataDir,'config.json'),'utf8'));
@@ -14,6 +14,9 @@ const origin=new URL(config.origin).origin, port=config.port||4318;
 const publishOrigins=new Map((config.publishOrigins||[]).map(o=>{const u=new URL(o).origin;return [new URL(u).host,u]}));
 const publishPaths=['/api/publish','/api/mcp'];
 const allowed=new Set([new URL(origin).host,`127.0.0.1:${port}`,`localhost:${port}`,...publishOrigins.keys()]);
+// Reading answers only on a direct call on this Mac: a loopback Host and no sign of a proxy, so a tunnel or Tailscale that rewrites the Host still counts as outside.
+const proxyHeaders=['cf-connecting-ip','cf-ray','cdn-loop','forwarded','via','x-forwarded-for','x-forwarded-host','x-forwarded-proto','x-real-ip','tailscale-funnel-request','tailscale-user-login'];
+const onLoopback=h=>[`127.0.0.1:${port}`,`localhost:${port}`].includes(h.host)&&!publishOrigins.has(h.host)&&!proxyHeaders.some(name=>h[name]!==undefined);
 const sign=s=>createHmac('sha256',config.sessionSecret).update(s).digest('hex');
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 function session(h){const v=h.match(/(?:^|;\s*)feed_session=([^;]+)/)?.[1];if(!v)return false;const [expiry,sig]=v.split('.');return Number(expiry)>Date.now()&&equal(sig,sign(expiry));}
@@ -66,7 +69,7 @@ createServer(async(req,res)=>{
    const h=new Headers();for(const [k,v]of Object.entries(req.headers))if(v!==undefined)h.set(k,Array.isArray(v)?v.join(','):v);
    const request=new Request(url,{method:req.method,headers:h,...(!['GET','HEAD'].includes(req.method)?{body:Readable.toWeb(req),duplex:'half'}:{})});
    const route=url.pathname==='/api/mcp'?mcp:api,handler=route[req.method];if(!handler)return send(405,'Method not allowed');
-   const response=await auth.run(authenticated,()=>handler(request,{params:Promise.resolve({path:url.pathname.slice(5).split('/')})}));
+   const response=await door.run(onLoopback(req.headers)?'loopback':'outside',()=>auth.run(authenticated,()=>handler(request,{params:Promise.resolve({path:url.pathname.slice(5).split('/')})})));
    res.writeHead(response.status,Object.fromEntries(response.headers));if(response.body)Readable.fromWeb(response.body).pipe(res);else res.end();return;
   }
   const asset=publicAsset(url.pathname);

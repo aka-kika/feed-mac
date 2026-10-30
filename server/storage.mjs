@@ -23,6 +23,8 @@ const statement=(query,args=[])=>({bind(...values){return statement(query,values
 function objectPath(key){if(!/^[a-f0-9-]{36}\/[a-f0-9-]{36}$/.test(key))throw Error('Invalid attachment key');return join(dataDir,'attachments',key);}
 export const env={DB:{prepare:statement,async batch(items){sql.exec('BEGIN');try{const out=items.map(s=>s.execute());sql.exec('COMMIT');return out}catch(e){sql.exec('ROLLBACK');throw e}}},BUCKET:{async put(key,bytes){const p=objectPath(key);mkdirSync(dirname(p),{recursive:true,mode:0o700});writeFileSync(p+'.tmp',bytes,{mode:0o600});renameSync(p+'.tmp',p)},async get(key){const p=objectPath(key);return existsSync(p)?{body:readFileSync(p)}:null},async delete(key){const p=objectPath(key);if(existsSync(p))unlinkSync(p)}}};
 export const auth=new AsyncLocalStorage();
+// Which door a request came through: 'loopback' only for a direct call on this Mac. Anything else, or nothing, keeps reading shut.
+export const door=new AsyncLocalStorage();
 // ntfy push on every new report. Optional: set "ntfy" in config.json ({url, topic, token, priority}). Never blocks or fails a publish.
 const configPath=join(dataDir,'config.json');
 const config=existsSync(configPath)?JSON.parse(readFileSync(configPath,'utf8')):{};
@@ -36,3 +38,5 @@ export function notify({title,message,click}){
 export const publicOrigin=config.origin?new URL(config.origin).origin:null;
 // Extra origins that reach the publish paths only (cloud agents), from "publishOrigins" in config.json.
 export const publishOrigins=(config.publishOrigins||[]).map(o=>new URL(o).origin);
+// Sources whose keys may read through MCP on this Mac's loopback address, from "readSources" in config.json. Off when absent.
+export const readSources=Array.isArray(config.readSources)?config.readSources.filter(s=>typeof s==='string'):[];

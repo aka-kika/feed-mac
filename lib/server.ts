@@ -1,4 +1,4 @@
-import { env, auth, notify, publicOrigin } from '../server/storage.mjs';
+import { env, auth, door, notify, publicOrigin, readSources } from '../server/storage.mjs';
 
 import { publishSchema, type PublishInput } from './validation';
 import { KIND_SQL } from './kinds';
@@ -36,6 +36,21 @@ export async function publisher(request: Request): Promise<Publisher> {
   const key = await db().prepare('SELECT id, owner, source FROM agent_keys WHERE hash = ?').bind(await hash(token)).first<Publisher>();
   if (!key) throw new HttpError(401, 'This publishing key is invalid or has been revoked.');
   return key;
+}
+/** Reading needs both: the key's source on the allow list, and a request that came straight in on this Mac. */
+export function canRead(key: Publisher) { return door.getStore() === 'loopback' && readSources.includes(key.source); }
+export function logRead(key: Publisher, tool: string, outcome: string) { console.log(`${new Date().toISOString()} read key=${key.id} source=${key.source} tool=${tool} outcome=${outcome}`); }
+// What an agent gets back: never the favourite flag, read state or comments, which are Kika's own.
+const AGENT_COLUMNS = `r.id, r.source, r.routine, r.title, r.published_at, r.saved_at, r.archived, ${KIND_SQL} AS kind`;
+export async function agentReport(key: Publisher, id: string) {
+  const report = await db().prepare(`SELECT ${AGENT_COLUMNS}, r.markdown FROM reports r WHERE r.id = ? AND r.owner = ? AND r.sample = 0`).bind(id, key.owner).first();
+  if (!report) throw new HttpError(404, 'Report not found.');
+  const attachments = await db().prepare('SELECT name, type, size FROM attachments WHERE report_id = ?').bind(id).all();
+  return { ...report, attachments: attachments.results };
+}
+export async function agentSaved(key: Publisher) {
+  const rows = await db().prepare(`SELECT ${AGENT_COLUMNS} FROM reports r WHERE r.owner = ? AND r.sample = 0 AND r.saved_at IS NOT NULL ORDER BY r.saved_at DESC, r.id DESC LIMIT 201`).bind(key.owner).all();
+  return { reports: rows.results.slice(0, 200), more: rows.results.length > 200 };
 }
 export async function ownedReport(id: string, user: string) {
   const report = await db().prepare('SELECT * FROM reports WHERE id = ? AND owner = ?').bind(id, user).first();

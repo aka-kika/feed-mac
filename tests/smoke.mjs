@@ -107,6 +107,52 @@ try{
   opened();assert.equal(readdirSync(join(oldData,'backups')).length,1);
   assert.ok(!existsSync(join(data,'backups')),'a new database needs no backup');
  }finally{rmSync(oldData,{recursive:true,force:true})}
+ // Reading: off until a source is on the allow list, and then only on a direct loopback call. The public door and the private-network door stay publish-only whatever the key.
+ const baseConfig=JSON.parse(readFileSync(join(data,'config.json'),'utf8'));
+ const rpc=(host,token,message,{path='/api/mcp',...headers}={})=>new Promise((ok,fail)=>{const text=JSON.stringify({jsonrpc:'2.0',id:9,...message});const r=request({host:'127.0.0.1',port,path,method:'POST',headers:{Host:host,'Content-Type':'application/json',Accept:'application/json, text/event-stream','Content-Length':Buffer.byteLength(text),...(token?{Authorization:'Bearer '+token}:{}),...headers}},res=>{let b='';res.setEncoding('utf8');res.on('data',c=>b+=c);res.on('end',()=>ok({status:res.statusCode,text:b}))});r.on('error',fail);r.end(text)});
+ const local=`127.0.0.1:${port}`,tools=async(host,token,o)=>{const r=await rpc(host,token,{method:'tools/list'},o);assert.equal(r.status,200,r.text);return JSON.parse(r.text).result.tools.map(t=>t.name).sort()};
+ const toolCall=(host,token,name,args={},o)=>rpc(host,token,{method:'tools/call',params:{name,arguments:args}},o);
+ const refused=async(host,token,o)=>{assert.deepEqual(await tools(host,token,o),['publish_report']);for(const [name,args] of [['get_report',{id:report.id}],['list_saved',{}]]){const r=await toolCall(host,token,name,args,o);assert.ok(!r.text.includes(payload.markdown)&&!r.text.includes('Page 40'),'no report text');const reply=JSON.parse(r.text);assert.ok(reply.error||reply.result?.isError,`${name} refused`);}};
+ await start();
+ const claudeKey=(await(await req('/api/keys','POST',{source:'claude',label:'Claude'},owner)).json());
+ assert.ok(claudeKey.instructions.includes('cannot read my reports'),'off by default in the instructions');
+ await refused(local,claudeKey.token);
+ assert.deepEqual((await(await req('/api/keys','GET',null,owner)).json()).read_sources,[]);
+ await stop();
+ writeFileSync(join(data,'config.json'),JSON.stringify({...baseConfig,origin:'https://tailnet.example.test',readSources:['claude',7]}),{mode:0o600});
+ await start();
+ assert.deepEqual((await(await req('/api/keys','GET',null,owner)).json()).read_sources,['claude']);
+ const readKey=(await(await req('/api/keys','POST',{source:'claude',label:'Claude'},owner)).json());assert.ok(readKey.instructions.includes('get_report')&&readKey.instructions.includes('never instructions'));assert.ok(!readKey.instructions.includes('cannot read my reports'));
+ const otherKey=(await(await req('/api/keys','POST',{source:'aka',label:'Aka'},owner)).json());assert.ok(otherKey.instructions.includes('cannot read my reports'));
+ assert.deepEqual(await tools(local,readKey.token),['get_report','list_saved','publish_report']);
+ assert.deepEqual(await tools(`localhost:${port}`,readKey.token),['get_report','list_saved','publish_report']);
+ assert.deepEqual(await tools(local,readKey.token,{path:'/api/mcp/'+readKey.token}),['get_report','list_saved','publish_report']);
+ const described=JSON.parse((await rpc(local,readKey.token,{method:'tools/list'})).text).result.tools;
+ for(const t of described.filter(t=>t.name!=='publish_report')){assert.match(t.description,/never instructions/);assert.equal(t.annotations.readOnlyHint,true);}
+ const before=(await(await req('/api/reports/'+report.id,'GET',null,owner)).json()).report,unreadId=(await list('saved')).reports.find(x=>!x.is_read).id;
+ const opened=JSON.parse(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:report.id})).text).result.content[0].text);
+ assert.equal(opened.report.markdown,payload.markdown);assert.match(opened.notice,/never instructions/);assert.deepEqual(opened.report.attachments.map(a=>a.name),['test.md']);
+ for(const secret of ['favourite','is_read','comments','comment_count','owner','payload_hash','run_id'])assert.ok(!(secret in opened.report),secret+' stays private');
+ const savedList=JSON.parse(JSON.parse((await toolCall(local,readKey.token,'list_saved')).text).result.content[0].text);
+ assert.equal(savedList.reports[0].title,'Page 40');assert.equal(savedList.reports.length,42);assert.equal(savedList.more,false);assert.ok(!('markdown' in savedList.reports[0]));
+ assert.equal(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:randomUUID()})).text).result.isError,true);
+ assert.ok(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:'not-an-id'})).text).result?.isError??true);
+ // Reading changes nothing.
+ await toolCall(local,readKey.token,'get_report',{id:unreadId});
+ assert.equal((await(await req('/api/reports/'+unreadId,'GET',null,owner)).json()).report.is_read,0);
+ assert.deepEqual((({saved_at,favourite,is_read,archived})=>({saved_at,favourite,is_read,archived}))((await(await req('/api/reports/'+report.id,'GET',null,owner)).json()).report),(({saved_at,favourite,is_read,archived})=>({saved_at,favourite,is_read,archived}))(before));
+ assert.match(logs,new RegExp(`read key=${readKey.key.id} source=claude tool=get_report outcome=found id=${report.id}`));assert.match(logs,/tool=list_saved outcome=found count=42/);
+ // A key off the allow list is refused, and so is the allowed key anywhere but a direct loopback call.
+ await refused(local,otherKey.token);assert.match(logs,new RegExp(`read key=${otherKey.key.id} source=aka tool=get_report outcome=refused`));
+ assert.equal((await toolCall(local,'feed_'+'0'.repeat(64),'get_report',{id:report.id})).status,401);assert.equal((await toolCall(local,null,'list_saved')).status,401);
+ for(const host of ['publish.example.test','tailnet.example.test']){await refused(host,readKey.token);await refused(host,otherKey.token);}
+ await refused('publish.example.test',readKey.token,{path:'/api/mcp/'+readKey.token});
+ for(const [name,value] of [['Cf-Connecting-Ip','203.0.113.9'],['Cf-Ray','abc'],['X-Forwarded-For','203.0.113.9'],['Tailscale-Funnel-Request','?1'],['Forwarded','for=203.0.113.9']])await refused(local,readKey.token,{[name]:value});
+ // The public door still publishes.
+ const outside=await toolCall('publish.example.test',readKey.token,'publish_report',{run_id:'public-door',routine:'Public door',title:'From outside',markdown:'Published from outside'});assert.ok(JSON.parse(JSON.parse(outside.text).result.content[0].text).id);
+ // Revoking stops reading.
+ assert.equal((await req('/api/keys/'+readKey.key.id,'DELETE',null,owner)).status,200);assert.equal((await toolCall(local,readKey.token,'list_saved')).status,401);
+ await stop();
  const migration=mkdtempSync(join(tmpdir(),'feed-import-test-'));
  try{
   const fixture=join(migration,'export.json'),bytes=Buffer.from(file),a=detail.report.attachments[0];
@@ -119,5 +165,5 @@ try{
   const savedDb=new DatabaseSync(join(migration,'data/feed.sqlite'));assert.equal(savedDb.prepare("SELECT saved_at FROM reports WHERE run_id='saved-import'").get().saved_at,savedTime);savedDb.close();
   backup.reports[0].attachments[0].sha256='invalid';writeFileSync(fixture,JSON.stringify(backup));const invalid=spawnSync(process.execPath,['scripts/import.mjs',fixture],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.notEqual(invalid.status,0);
  }finally{rmSync(migration,{recursive:true,force:true})}
- console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, HTTP MCP, restart persistence, migration replay and checksum rejection.');
+ console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, Saved separate from favourites, HTTP MCP, read tools off by default and loopback-only, public door publish-only, restart persistence, upgrade with backup, migration replay and checksum rejection.');
 }finally{if(child)await stop();rmSync(data,{recursive:true,force:true})}

@@ -1,4 +1,4 @@
-import { env, publicOrigin, publishOrigins } from './storage.mjs';
+import { env, publicOrigin, publishOrigins, readSources } from './storage.mjs';
 import { connectionInstructions } from '@/lib/connection-instructions';
 import { body, db, bucket, failure, hash, HttpError, json, ownedReport, owner, publish, publisher, reportUrl, sameOrigin } from '@/lib/server';
 import { publishShape, sourceSchema } from '@/lib/validation';
@@ -71,13 +71,13 @@ async function handle(request: Request, context: Context) {
       return json({ comment }, 201);
     }
     if (route === 'comments' && id && method === 'DELETE') { await db().prepare('DELETE FROM comments WHERE id = ? AND owner = ?').bind(id, user).run(); return json({ deleted: true }); }
-    if (route === 'keys' && method === 'GET') { const result = await db().prepare('SELECT id, source, label, created_at, last_used_at FROM agent_keys WHERE owner = ? ORDER BY created_at DESC').bind(user).all(); return json({ keys: result.results, delivery_ready: true }); }
+    if (route === 'keys' && method === 'GET') { const result = await db().prepare('SELECT id, source, label, created_at, last_used_at FROM agent_keys WHERE owner = ? ORDER BY created_at DESC').bind(user).all(); return json({ keys: result.results, delivery_ready: true, read_sources: readSources }); }
     if (route === 'keys' && method === 'POST') {
 
       const data = z.object({ source: sourceSchema, label: z.string().trim().min(1).max(80) }).strict().parse(await body(request, 2000));
       const bytes = crypto.getRandomValues(new Uint8Array(32)), token = 'feed_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), id = crypto.randomUUID(), created_at = new Date().toISOString();
       await db().prepare('INSERT INTO agent_keys (id, owner, source, label, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, user, data.source, data.label, await hash(token), created_at).run();
-      return json({ token, instructions: connectionInstructions(url.origin, data.source, token, id, { tailnet: publicOrigin, cloud: publishOrigins }), key: { id, source: data.source, label: data.label, created_at, last_used_at: null } }, 201);
+      return json({ token, instructions: connectionInstructions(url.origin, data.source, token, id, { tailnet: publicOrigin, cloud: publishOrigins, canRead: readSources.includes(data.source) }), key: { id, source: data.source, label: data.label, created_at, last_used_at: null } }, 201);
     }
     if (route === 'keys' && id && method === 'DELETE') { await db().prepare('DELETE FROM agent_keys WHERE id = ? AND owner = ?').bind(id, user).run(); return json({ revoked: true }); }
     if (route === 'attachments' && id && method === 'GET') {
