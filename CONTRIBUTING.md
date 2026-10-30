@@ -25,8 +25,10 @@ Node.js 24 or newer. The smoke test never touches a real data folder.
   status codes and the idempotent retry must keep working for every agent
   already connected, so changes to `lib/validation.ts`, `lib/server.ts` or
   `server/mcp.ts` need a smoke-test assertion and a clear reason.
-- Feed listens on loopback and keys can only publish. Changes that open the
-  reader to the network or let a key read reports will not be merged.
+- Feed listens on loopback and keys publish. Reading is off unless the owner
+  lists a source in `readSources`, and it answers only a direct loopback call.
+  Changes that open the reader to the network, let a key read from anywhere
+  else, or let a key change anything but its own reports will not be merged.
 
 ## License
 

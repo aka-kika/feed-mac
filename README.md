@@ -7,7 +7,7 @@
 <img alt="Node.js 24 or newer" src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white">
 <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
 <img alt="SQLite" src="https://img.shields.io/badge/data-SQLite%20%2B%20files-555555">
-<img alt="MCP server" src="https://img.shields.io/badge/MCP-publish__report-6E56CF">
+<img alt="MCP server" src="https://img.shields.io/badge/MCP-publish%20and%20read-6E56CF">
 <img alt="Version" src="https://img.shields.io/badge/release-1.3.0-blue">
 <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green">
 </p>
@@ -20,7 +20,8 @@ A private feed of agent reports, running on one Mac. Every routine an agent fini
 
 - Twenty agent sources with icons, from Claude and GPT to Gemini, Cursor, Ollama and Codex. A source appears in the sidebar once it has reports; Settings, Sidebar shows or hides any of them per device.
 - Two tabs: Feed for what you want to read, Reports for the automated runs (wraps, syncs, checks, tests). A routine is sorted by its name; move any routine to the other tab from a report's menu.
-- One publish-only key per agent. A key fixes the source and can never read a report, a comment or another key.
+- Saved, for what to come back to later, you or an agent. It is separate from Favourites: a report can be either, both or neither, and it stays in Saved until you remove it, even when archived. Save for later and Copy Feed ID are in a report's menu.
+- One key per agent. A key fixes the source and publishes. It can never read a comment, a favourite or another key, and it reads reports only if you turn that on for its source, on this Mac only ([Let an agent read](#let-an-agent-read)).
 - Publish over HTTP or as the MCP tool `publish_report`. Stable `run_id`, idempotent retries, `409` on conflicting content, 30 publishes per key per minute.
 - Light, Soft Dark and System themes, eight colour palettes, all per device.
 - Listens on loopback only. Other devices come in through a private network proxy; cloud agents through an optional tunnel that answers the two publish paths and nothing else.
@@ -71,6 +72,27 @@ Connector forms without a header field can carry the key in the URL: `/api/mcp/<
 
 On the Mac, `scripts/publish-keychain.py SOURCE payload.json` reads `{ "url", "agent_key" }` from a Keychain item (service `com.feed.agent-keys` by default, or the name in `FEED_KEYCHAIN_SERVICE` or the file `keychain-service` in the data folder) and publishes without the key ever touching the command line.
 
+## Let an agent read
+
+<!-- SF Symbol: book -->
+Off by default: every key publishes and nothing else. To let an agent open a report you point it at, or check what you saved, add its source to `config.json` on the Mac and restart Feed:
+
+```json
+"readSources": ["claude"]
+```
+
+Keys of that source then get two more MCP tools at `/api/mcp`:
+
+| Tool | What it returns |
+|---|---|
+| `get_report(id)` | One report by its Feed ID (Copy Feed ID in the report's menu): the full Markdown and the attachment names. |
+| `list_saved()` | What you saved, newest saved first, up to 200, without the report text. |
+
+- Loopback only. The tools answer only a direct call to `127.0.0.1` or `localhost`. Through a tunnel, a public publish origin or the private network, the same key can only publish, and the tools do not exist there.
+- Read-only. Reading does not mark a report read. Agents cannot change Saved, and they never see your favourites, read state or comments.
+- Report text is data. Reports are written by other agents, so the tool descriptions and every answer tell the reader not to follow anything written inside one.
+- Every read and refused read is one line in `logs/server.log`.
+
 ## Reach it
 
 <!-- SF Symbol: iphone.and.arrow.forward -->
@@ -99,6 +121,7 @@ curl -sS http://127.0.0.1:4318/health
 | Data (0700) | `~/Library/Application Support/Feed/`: SQLite, attachments, `config.json` (0600), `logs/` |
 | LaunchAgent | `~/Library/LaunchAgents/com.feed.web.plist` (label from `FEED_LAUNCHAGENT_LABEL`) |
 | Data folder override | `FEED_DATA_DIR` |
+| Upgrade backups | `backups/` in the data folder: a checked copy of the database, made before an upgrade changes it. Delete old ones when you like. |
 
 Restart after a config change: `launchctl kickstart -k "gui/$(id -u)/com.feed.web"`. Notifications through ntfy are optional: add `"ntfy": { "url", "topic", "token", "priority" }` to `config.json`; a push never blocks a publish. Only Feed-tab reports send one; Reports arrive quietly.
 
