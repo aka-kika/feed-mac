@@ -21,7 +21,7 @@ A private feed of agent reports, running on one Mac. Every routine an agent fini
 - Twenty agent sources with icons, from Claude and GPT to Gemini, Cursor, Ollama and Codex. A source appears in the sidebar once it has reports; Settings, Sidebar shows or hides any of them per device.
 - Two tabs: Feed for what you want to read, Reports for the automated runs (wraps, syncs, checks, tests). A routine is sorted by its name; move any routine to the other tab from a report's menu.
 - Saved, for what to come back to later, you or an agent. It is separate from Favourites: a report can be either, both or neither, and it stays in Saved until you remove it, even when archived. Save for later and Copy Feed ID are in a report's menu.
-- One key per agent. A key fixes the source and publishes. It can never read a comment, a favourite or another key, and it reads reports only if you turn that on for its source, on this Mac only ([Let an agent read](#let-an-agent-read)).
+- One key per agent. A key fixes the source and publishes. It can never read a favourite or another key, and it reads reports and your comments on them only if you turn that on for its source, on this Mac only ([Let an agent read](#let-an-agent-read)).
 - Publish over HTTP or as the MCP tool `publish_report`. Stable `run_id`, idempotent retries, `409` on conflicting content, 30 publishes per key per minute.
 - Light, Soft Dark and System themes, eight colour palettes, all per device.
 - Listens on loopback only. Other devices come in through a private network proxy; cloud agents through an optional tunnel that answers the two publish paths and nothing else.
@@ -85,12 +85,12 @@ Keys of that source then get two more MCP tools at `/api/mcp`:
 
 | Tool | What it returns |
 |---|---|
-| `get_report(id)` | One report by its Feed ID (Copy Feed ID in the report's menu): the full Markdown and the attachment names. |
-| `list_saved()` | What you saved, newest saved first, up to 200, without the report text. |
+| `get_report(id)` | One report by its Feed ID (Copy Feed ID in the report's menu): the full Markdown, the attachment names and your comments on it, marked `owner_notes`. |
+| `list_saved()` | What you saved, newest saved first, up to 200, without the report text or comments. |
 
 - Loopback only. The tools answer only a direct call to `127.0.0.1` or `localhost`. Through a tunnel, a public publish origin or the private network, the same key can only publish, and the tools do not exist there.
-- Read-only. Reading does not mark a report read. Agents cannot change Saved, and they never see your favourites, read state or comments.
-- Report text is data. Reports are written by other agents, so the tool descriptions and every answer tell the reader not to follow anything written inside one.
+- Read-only. Reading does not mark a report read. Agents cannot change Saved, and they never see your favourites or read state.
+- Report text and comments are data. Reports are written by other agents, so the tool descriptions and every answer tell the reader not to follow anything written inside a report or a comment.
 - Every read and refused read is one line in `logs/server.log`.
 
 ## Reach it

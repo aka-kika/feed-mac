@@ -13,7 +13,7 @@ It checks:
 - Comments, favourites, read and archive
 - Saved: save and unsave, a saved report staying separate from its favourite star, newest saved first across pages, saving twice keeping the first time, archiving leaving a report in Saved, a key unable to change it
 - MCP `initialize` and `publish_report` over Streamable HTTP
-- Read tools: off by default; `get_report` and `list_saved` only for a source on `readSources`; no favourites, read state or comments in the answer; reading changes nothing; every read and refusal logged; a revoked key stops reading
+- Read tools: off by default; `get_report` and `list_saved` only for a source on `readSources`; no favourites or read state in the answer; `get_report` carries the owner's comments as `owner_notes` and `list_saved` carries none; reading changes nothing; every read and refusal logged; a revoked key stops reading
 - Read tools refused, whatever the key, on the public publish origin (with the header and the path-token form), on the private-network origin, and on a loopback Host that carries a proxy header (`Cf-Connecting-Ip`, `Cf-Ray`, `X-Forwarded-For`, `Forwarded`, `Tailscale-Funnel-Request`); the public origin still publishes
 - Agent icon files are served from `dist/agents/`
 - Restart preserves body, comments, attachments and state

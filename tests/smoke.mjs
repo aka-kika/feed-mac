@@ -112,7 +112,7 @@ try{
  const rpc=(host,token,message,{path='/api/mcp',...headers}={})=>new Promise((ok,fail)=>{const text=JSON.stringify({jsonrpc:'2.0',id:9,...message});const r=request({host:'127.0.0.1',port,path,method:'POST',headers:{Host:host,'Content-Type':'application/json',Accept:'application/json, text/event-stream','Content-Length':Buffer.byteLength(text),...(token?{Authorization:'Bearer '+token}:{}),...headers}},res=>{let b='';res.setEncoding('utf8');res.on('data',c=>b+=c);res.on('end',()=>ok({status:res.statusCode,text:b}))});r.on('error',fail);r.end(text)});
  const local=`127.0.0.1:${port}`,tools=async(host,token,o)=>{const r=await rpc(host,token,{method:'tools/list'},o);assert.equal(r.status,200,r.text);return JSON.parse(r.text).result.tools.map(t=>t.name).sort()};
  const toolCall=(host,token,name,args={},o)=>rpc(host,token,{method:'tools/call',params:{name,arguments:args}},o);
- const refused=async(host,token,o)=>{assert.deepEqual(await tools(host,token,o),['publish_report']);for(const [name,args] of [['get_report',{id:report.id}],['list_saved',{}]]){const r=await toolCall(host,token,name,args,o);assert.ok(!r.text.includes(payload.markdown)&&!r.text.includes('Page 40'),'no report text');const reply=JSON.parse(r.text);assert.ok(reply.error||reply.result?.isError,`${name} refused`);}};
+ const refused=async(host,token,o)=>{assert.deepEqual(await tools(host,token,o),['publish_report']);for(const [name,args] of [['get_report',{id:report.id}],['list_saved',{}]]){const r=await toolCall(host,token,name,args,o);assert.ok(!r.text.includes(payload.markdown)&&!r.text.includes('Page 40')&&!r.text.includes(comment.body),'no report text or comments');const reply=JSON.parse(r.text);assert.ok(reply.error||reply.result?.isError,`${name} refused`);}};
  await start();
  const claudeKey=(await(await req('/api/keys','POST',{source:'claude',label:'Claude'},owner)).json());
  assert.ok(claudeKey.instructions.includes('cannot read my reports'),'off by default in the instructions');
@@ -133,8 +133,20 @@ try{
  const opened=JSON.parse(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:report.id})).text).result.content[0].text);
  assert.equal(opened.report.markdown,payload.markdown);assert.match(opened.notice,/never instructions/);assert.deepEqual(opened.report.attachments.map(a=>a.name),['test.md']);
  for(const secret of ['favourite','is_read','comments','comment_count','owner','payload_hash','run_id'])assert.ok(!(secret in opened.report),secret+' stays private');
+ assert.equal(opened.report.owner_notes.length,1);assert.equal(opened.report.owner_notes[0].body,comment.body);assert.deepEqual(Object.keys(opened.report.owner_notes[0]).sort(),['body','created_at'],'her notes, nothing else');
  const savedList=JSON.parse(JSON.parse((await toolCall(local,readKey.token,'list_saved')).text).result.content[0].text);
  assert.equal(savedList.reports[0].title,'Page 40');assert.equal(savedList.reports.length,42);assert.equal(savedList.more,false);assert.ok(!('markdown' in savedList.reports[0]));
+ // Comments come with one opened report, oldest first, and never with the Saved list. A deleted one is gone.
+ const shelfId=savedList.reports[0].id,noteOf=async()=>JSON.parse(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:shelfId})).text).result.content[0].text).report.owner_notes.map(n=>n.body);
+ assert.deepEqual(await noteOf(),[]);
+ const shelfNote={id:randomUUID(),report_id:shelfId,body:'First note on a saved report'};assert.equal((await req('/api/comments','POST',shelfNote,owner)).status,201);await new Promise(r=>setTimeout(r,5));
+ assert.equal((await req('/api/comments','POST',{id:randomUUID(),report_id:shelfId,body:'Second note'},owner)).status,201);
+ assert.deepEqual(await noteOf(),['First note on a saved report','Second note']);
+ assert.ok(!(await toolCall(local,readKey.token,'list_saved')).text.includes('note on a saved report'),'no comments in the Saved list');
+ assert.match(described.find(t=>t.name==='get_report').description,/owner_notes/);assert.ok(readKey.instructions.includes('owner_notes'));assert.ok(!otherKey.instructions.includes('owner_notes'),'off the allow list, not even mentioned');
+ const offList=await toolCall(local,otherKey.token,'get_report',{id:shelfId});assert.ok(!offList.text.includes('note on a saved report'),'a key off the allow list gets no comments');
+ const outsideRead=await toolCall('publish.example.test',readKey.token,'get_report',{id:shelfId});assert.ok(!outsideRead.text.includes('note on a saved report'),'the public door gets no comments');
+ assert.equal((await req('/api/comments/'+shelfNote.id,'DELETE',null,owner)).status,200);assert.deepEqual(await noteOf(),['Second note']);
  assert.equal(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:randomUUID()})).text).result.isError,true);
  assert.ok(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:'not-an-id'})).text).result?.isError??true);
  // Reading changes nothing.
@@ -165,5 +177,5 @@ try{
   const savedDb=new DatabaseSync(join(migration,'data/feed.sqlite'));assert.equal(savedDb.prepare("SELECT saved_at FROM reports WHERE run_id='saved-import'").get().saved_at,savedTime);savedDb.close();
   backup.reports[0].attachments[0].sha256='invalid';writeFileSync(fixture,JSON.stringify(backup));const invalid=spawnSync(process.execPath,['scripts/import.mjs',fixture],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.notEqual(invalid.status,0);
  }finally{rmSync(migration,{recursive:true,force:true})}
- console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, Saved separate from favourites, HTTP MCP, read tools off by default and loopback-only, public door publish-only, restart persistence, upgrade with backup, migration replay and checksum rejection.');
+ console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, Saved separate from favourites, HTTP MCP, read tools off by default and loopback-only, comments only with one opened report, public door publish-only, restart persistence, upgrade with backup, migration replay and checksum rejection.');
 }finally{if(child)await stop();rmSync(data,{recursive:true,force:true})}
