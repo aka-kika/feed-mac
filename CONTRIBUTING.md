@@ -28,7 +28,7 @@ Node.js 24 or newer. The smoke test never touches a real data folder.
 - Feed listens on loopback and keys publish. Reading is off unless the owner
   lists a source in `readSources`, and it answers only a direct loopback call.
   Changes that open the reader to the network, let a key read from anywhere
-  else, or let a key change anything but its own reports will not be merged.
+  else, or let a key change Saved will not be merged.
 
 ## License
 
