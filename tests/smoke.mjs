@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtempSync,writeFileSync,rmSync,readFileSync,mkdirSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,rmSync,readFileSync,mkdirSync,readdirSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes,scryptSync,randomUUID,createHash} from 'node:crypto';
@@ -64,7 +64,49 @@ try{
  assert.equal((await list('news')).reports.length,0);assert.equal((await list('reports')).reports.length,2);
  assert.equal((await req('/api/routine-kinds','POST',{source:'aka',routine:'AI news digest',kind:'news'},owner)).status,200);
  const newsId=(await list('news')).reports[0].id;assert.equal((await(await req('/api/reports/'+newsId,'GET',null,owner)).json()).report.kind,'news');
- await stop();await start();detail=await(await req('/api/reports/'+report.id,'GET',null,owner)).json();assert.equal(detail.report.markdown,payload.markdown);assert.equal(detail.report.archived,1);assert.equal(detail.comments[0].body,comment.body);await stop();
+ // Saved and Favourite are separate: a report can be either, both or neither. Saved lists newest saved first, also across pages, and keeps a report that gets archived.
+ const titles=async(view,cursor='')=>{const l=await list(view+(cursor?'&cursor='+encodeURIComponent(cursor):''));return [l.reports.map(x=>x.title),l.cursor]};
+ const newsReport=(await list('news')).reports[0].id,mcpReport=(await list('reports')).reports[0].id;
+ assert.deepEqual((await titles('saved'))[0],[]);
+ assert.equal((await req('/api/reports/'+newsReport,'PATCH',{saved:'yes'},owner)).status,400);
+ assert.equal((await req('/api/reports/'+newsReport,'PATCH',{saved:true},{...owner,Origin:'https://evil.test'})).status,403);
+ assert.equal((await req('/api/reports/'+newsReport,'PATCH',{saved:true},agent)).status,401);
+ assert.equal((await req('/api/reports/'+newsReport,'PATCH',{saved:true},owner)).status,200);
+ let state=(await(await req('/api/reports/'+newsReport,'GET',null,owner)).json()).report;assert.equal(state.saved,1);assert.ok(state.saved_at);assert.equal(state.favourite,0);
+ assert.deepEqual((await titles('saved'))[0],['News']);assert.deepEqual((await titles('favourites'))[0],[]);
+ assert.equal((await req('/api/reports/'+mcpReport,'PATCH',{favourite:true},owner)).status,200);
+ assert.deepEqual((await titles('saved'))[0],['News']);assert.deepEqual((await titles('favourites'))[0],['MCP report']);
+ await new Promise(r=>setTimeout(r,5));
+ assert.equal((await req('/api/reports/'+mcpReport,'PATCH',{saved:true},owner)).status,200);
+ assert.deepEqual((await titles('saved'))[0],['MCP report','News'],'newest saved first');assert.deepEqual((await titles('favourites'))[0],['MCP report']);
+ await new Promise(r=>setTimeout(r,5));
+ assert.equal((await req('/api/reports/'+newsReport,'PATCH',{saved:true},owner)).status,200);
+ assert.deepEqual((await titles('saved'))[0],['MCP report','News'],'saving twice keeps the first saved time');
+ assert.equal((await req('/api/reports/'+newsReport,'PATCH',{archived:true},owner)).status,200);
+ assert.deepEqual((await titles('saved'))[0],['MCP report','News'],'archiving leaves a report in Saved');
+ assert.equal((await req('/api/reports/'+newsReport,'PATCH',{archived:false},owner)).status,200);
+ assert.equal((await req('/api/reports/'+mcpReport,'PATCH',{saved:false},owner)).status,200);
+ assert.deepEqual((await titles('saved'))[0],['News']);assert.deepEqual((await titles('favourites'))[0],['MCP report'],'unsaving leaves the star');
+ assert.equal((await req('/api/reports/'+mcpReport,'PATCH',{favourite:false},owner)).status,200);
+ assert.deepEqual((await titles('saved'))[0],['News'],'unstarring leaves Saved');
+ let pager;for(let i=0;i<41;i++){if(i%25===0)pager={Authorization:'Bearer '+(await(await req('/api/keys','POST',{source:'aka',label:'Paging'},owner)).json()).token};const page=await(await req('/api/publish','POST',{run_id:'page-'+i,routine:'Saved paging',title:'Page '+i,markdown:'Paging'},pager)).json();await new Promise(r=>setTimeout(r,2));assert.equal((await req('/api/reports/'+page.id,'PATCH',{saved:true},owner)).status,200);}
+ const [first,next]=await titles('saved');assert.equal(first.length,40);assert.equal(first[0],'Page 40');assert.ok(next);const [rest,end]=await titles('saved',next);assert.deepEqual(rest,['Page 0','News']);assert.equal(end,null);
+ await stop();await start();detail=await(await req('/api/reports/'+report.id,'GET',null,owner)).json();assert.equal(detail.report.markdown,payload.markdown);assert.equal(detail.report.archived,1);assert.equal(detail.comments[0].body,comment.body);assert.equal((await list('saved')).reports[0].title,'Page 40');await stop();
+ // An old database upgrades with nothing lost and a backup first; a second start changes nothing; a new database needs no backup.
+ const oldData=mkdtempSync(join(tmpdir(),'feed-upgrade-test-'));
+ try{
+  const {DatabaseSync}=await import('node:sqlite'),old=new DatabaseSync(join(oldData,'feed.sqlite')),now=new Date().toISOString(),oldId=randomUUID();
+  old.exec('CREATE TABLE migrations (name TEXT PRIMARY KEY)');
+  for(const name of ['0000_special_shard.sql','0001_lowly_stephen_strange.sql','0002_routine_kinds.sql']){old.exec(readFileSync(new URL('../drizzle/'+name,import.meta.url),'utf8'));old.prepare('INSERT INTO migrations VALUES (?)').run(name);}
+  old.prepare("INSERT INTO reports (id,owner,source,run_id,routine,title,markdown,payload_hash,published_at,received_at,favourite) VALUES (?,'local-owner','aka','old-run','Old routine','Old report','Old body','hash',?,?,1)").run(oldId,now,now);
+  old.prepare("INSERT INTO comments (id,report_id,owner,body,created_at) VALUES (?,?,'local-owner','Old comment',?)").run(randomUUID(),oldId,now);old.close();
+  const opened=()=>{const run=spawnSync(process.execPath,['--input-type=module','-e',"import {sql} from './server/storage.mjs';console.log(JSON.stringify({r:sql.prepare('SELECT * FROM reports').all(),c:sql.prepare('SELECT count(*) n FROM comments').get().n,m:sql.prepare('SELECT count(*) n FROM migrations').get().n}))"],{env:{...process.env,FEED_DATA_DIR:oldData},encoding:'utf8'});assert.equal(run.status,0,run.stderr);return JSON.parse(run.stdout)};
+  const after=opened();assert.equal(after.m,4);assert.equal(after.c,1);assert.equal(after.r.length,1);assert.equal(after.r[0].markdown,'Old body');assert.equal(after.r[0].favourite,1);assert.equal(after.r[0].saved_at,null);
+  const backups=readdirSync(join(oldData,'backups'));assert.equal(backups.length,1);assert.match(backups[0],/^feed-before-0003_saved-\d+\.sqlite$/);
+  const copy=new DatabaseSync(join(oldData,'backups',backups[0]),{readOnly:true});assert.equal(copy.prepare('SELECT markdown FROM reports').get().markdown,'Old body');assert.ok(!copy.prepare('PRAGMA table_info(reports)').all().some(c=>c.name==='saved_at'),'the backup is from before the change');copy.close();
+  opened();assert.equal(readdirSync(join(oldData,'backups')).length,1);
+  assert.ok(!existsSync(join(data,'backups')),'a new database needs no backup');
+ }finally{rmSync(oldData,{recursive:true,force:true})}
  const migration=mkdtempSync(join(tmpdir(),'feed-import-test-'));
  try{
   const fixture=join(migration,'export.json'),bytes=Buffer.from(file),a=detail.report.attachments[0];
@@ -72,6 +114,9 @@ try{
   for(let i=0;i<2;i++){const run=spawnSync(process.execPath,['scripts/import.mjs',fixture],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.equal(run.status,0,run.stderr);assert.equal(JSON.parse(run.stdout).total,1);}
   const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(join(migration,'data/feed.sqlite'));assert.equal(db.prepare('SELECT archived FROM reports').get().archived,1);assert.equal(db.prepare('SELECT count(*) n FROM comments').get().n,1);db.close();
   assert.equal(readFileSync(join(migration,'data/attachments',report.id,a.id),'utf8'),file);
+  const savedTime=new Date().toISOString(),savedExport=join(migration,'saved.json');writeFileSync(savedExport,JSON.stringify({format:'feed-portable-v1',reports:[{report:{...detail.report,id:randomUUID(),run_id:'saved-import',saved_at:savedTime},comments:[],attachments:[]}]}));
+  const savedRun=spawnSync(process.execPath,['scripts/import.mjs',savedExport],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.equal(savedRun.status,0,savedRun.stderr);
+  const savedDb=new DatabaseSync(join(migration,'data/feed.sqlite'));assert.equal(savedDb.prepare("SELECT saved_at FROM reports WHERE run_id='saved-import'").get().saved_at,savedTime);savedDb.close();
   backup.reports[0].attachments[0].sha256='invalid';writeFileSync(fixture,JSON.stringify(backup));const invalid=spawnSync(process.execPath,['scripts/import.mjs',fixture],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.notEqual(invalid.status,0);
  }finally{rmSync(migration,{recursive:true,force:true})}
  console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, HTTP MCP, restart persistence, migration replay and checksum rejection.');

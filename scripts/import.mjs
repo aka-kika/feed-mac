@@ -14,6 +14,8 @@ const seen=new Set();for(const {report:r,comments,attachments} of input.reports)
  for(const k of columns)if(r[k]===undefined)throw Error('Missing report field');
  for(const k of ['source','run_id','routine','title','markdown','published_at','received_at'])if(typeof r[k]!=='string')throw Error('Invalid report text');
  for(const k of ['favourite','is_read','sample','archived'])if(![0,1].includes(r[k]))throw Error('Invalid report state');
+ // Exports from before Saved have no saved_at.
+ if(r.saved_at!==undefined&&r.saved_at!==null&&typeof r.saved_at!=='string')throw Error('Invalid report state');
  for(const c of comments)if(!id(c.id)||typeof c.body!=='string'||typeof c.created_at!=='string')throw Error('Invalid comment');
  for(const a of attachments){if(!id(a.id)||typeof a.name!=='string'||typeof a.type!=='string'||typeof a.base64!=='string')throw Error('Invalid attachment');const b=Buffer.from(a.base64,'base64');if(b.length!==a.size||hash(b)!==a.sha256)throw Error('Attachment checksum mismatch');}
 }
@@ -25,7 +27,7 @@ try{
   for(const a of attachments){const p=join(dataDir,'attachments',r.id,a.id);if(existsSync(p))throw Error('Attachment already exists; inspect before retry');mkdirSync(dirname(p),{recursive:true,mode:0o700});writeFileSync(p+'.import',Buffer.from(a.base64,'base64'),{mode:0o600});staged.push(p);}
   // Original request hash is private and absent from owner API export. Preserve run IDs;
   // historical deliveries intentionally conflict rather than falsely deduplicate different content.
-  sql.prepare(`INSERT INTO reports (${columns.join(',')},owner,payload_hash) VALUES (${columns.map(()=>'?').join(',')},?,?)`).run(...columns.map(k=>r[k]),'local-owner','imported:'+hash(r.markdown));
+  sql.prepare(`INSERT INTO reports (${columns.join(',')},saved_at,owner,payload_hash) VALUES (${columns.map(()=>'?').join(',')},?,?,?)`).run(...columns.map(k=>r[k]),r.saved_at??null,'local-owner','imported:'+hash(r.markdown));
   for(const c of comments)sql.prepare('INSERT INTO comments (id,report_id,owner,body,created_at) VALUES (?,?,?,?,?)').run(c.id,r.id,'local-owner',c.body,c.created_at);
   for(const a of attachments)sql.prepare('INSERT INTO attachments (id,report_id,name,type,size,object_key) VALUES (?,?,?,?,?,?)').run(a.id,r.id,a.name,a.type,a.size,r.id+'/'+a.id);
   added++;

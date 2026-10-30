@@ -7,8 +7,16 @@ export const dataDir=resolve(process.env.FEED_DATA_DIR||join(homedir(),'Library/
 mkdirSync(dataDir,{recursive:true,mode:0o700});chmodSync(dataDir,0o700);
 export const sql=new DatabaseSync(join(dataDir,'feed.sqlite'));
 sql.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)');
-for(const name of readdirSync(new URL('../drizzle/',import.meta.url)).filter(n=>n.endsWith('.sql')).sort()){
- if(sql.prepare('SELECT name FROM migrations WHERE name=?').get(name))continue;
+const pending=readdirSync(new URL('../drizzle/',import.meta.url)).filter(n=>n.endsWith('.sql')).sort().filter(name=>!sql.prepare('SELECT name FROM migrations WHERE name=?').get(name));
+// A database that already holds reports is copied before it changes, so an upgrade can be undone. A copy that fails or comes up short stops the upgrade.
+if(pending.length&&sql.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reports'").get()){
+ const folder=join(dataDir,'backups');mkdirSync(folder,{recursive:true,mode:0o700});
+ const copy=join(folder,`feed-before-${pending[0].replace(/\.sql$/,'')}-${Date.now()}.sqlite`);
+ sql.exec(`VACUUM INTO '${copy.replaceAll("'","''")}'`);chmodSync(copy,0o600);
+ const check=new DatabaseSync(copy,{readOnly:true}),kept=check.prepare('SELECT count(*) n FROM reports').get().n;check.close();
+ if(kept!==sql.prepare('SELECT count(*) n FROM reports').get().n)throw Error('The database backup is incomplete. Upgrade stopped.');
+}
+for(const name of pending){
  sql.exec('BEGIN');try{sql.exec(readFileSync(new URL('../drizzle/'+name,import.meta.url),'utf8'));sql.prepare('INSERT INTO migrations VALUES (?)').run(name);sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}
 }
 const statement=(query,args=[])=>({bind(...values){return statement(query,values)},async first(){return sql.prepare(query).get(...args)??null},async all(){return {results:sql.prepare(query).all(...args)}},async run(){return sql.prepare(query).run(...args)},execute(){return sql.prepare(query).run(...args)}});

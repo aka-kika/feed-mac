@@ -11626,7 +11626,8 @@ async function handle(request, context) {
       const where = ["r.owner = ?", "r.sample = 0"];
       const args = [user];
       const source = url.searchParams.get("source"), routine = url.searchParams.get("routine"), view = url.searchParams.get("view"), q = url.searchParams.get("q")?.slice(0, 200);
-      where.push(view === "archive" ? "r.archived = 1" : "r.archived = 0");
+      const saved = view === "saved", order = saved ? "saved_at" : "published_at";
+      where.push(saved ? "r.saved_at IS NOT NULL" : view === "archive" ? "r.archived = 1" : "r.archived = 0");
       if (source) {
         where.push("r.source = ?");
         args.push(source);
@@ -11649,17 +11650,17 @@ async function handle(request, context) {
         try {
           const [date3, key] = JSON.parse(atob(cursor));
           if (typeof date3 !== "string" || typeof key !== "string") throw Error();
-          where.push("(r.published_at < ? OR (r.published_at = ? AND r.id < ?))");
+          where.push(`(r.${order} < ? OR (r.${order} = ? AND r.id < ?))`);
           args.push(date3, date3, key);
         } catch {
           throw new HttpError(400, "Invalid page cursor.");
         }
       }
-      const results = await db().prepare(`SELECT r.id, r.source, r.routine, r.title, substr(r.markdown, 1, 320) AS markdown, r.published_at, r.received_at, r.favourite, r.archived, r.is_read, r.sample, ${KIND_SQL} AS kind, (SELECT count(*) FROM comments c WHERE c.report_id = r.id) AS comment_count FROM reports r WHERE ${where.join(" AND ")} ORDER BY r.published_at DESC, r.id DESC LIMIT 41`).bind(...args).all();
+      const results = await db().prepare(`SELECT r.id, r.source, r.routine, r.title, substr(r.markdown, 1, 320) AS markdown, r.published_at, r.received_at, r.favourite, r.saved_at, (r.saved_at IS NOT NULL) AS saved, r.archived, r.is_read, r.sample, ${KIND_SQL} AS kind, (SELECT count(*) FROM comments c WHERE c.report_id = r.id) AS comment_count FROM reports r WHERE ${where.join(" AND ")} ORDER BY r.${order} DESC, r.id DESC LIMIT 41`).bind(...args).all();
       const more = results.results.length > 40, items = results.results.slice(0, 40), last = items.at(-1);
       const routines = await db().prepare(`SELECT DISTINCT r.source, r.routine, ${KIND_SQL} AS kind FROM reports r WHERE r.owner = ? AND r.sample = 0 ORDER BY r.routine`).bind(user).all();
       const counts = await db().prepare(`SELECT count(*) AS total, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 THEN 1 ELSE 0 END),0) AS unread, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'news' THEN 1 ELSE 0 END),0) AS unread_news, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'report' THEN 1 ELSE 0 END),0) AS unread_reports FROM reports r WHERE r.owner = ? AND r.sample = 0`).bind(user).first();
-      return json({ reports: items, routines: routines.results, counts, cursor: more && last ? btoa(JSON.stringify([last.published_at, last.id])) : null });
+      return json({ reports: items, routines: routines.results, counts, cursor: more && last ? btoa(JSON.stringify([last[order], last.id])) : null });
     }
     if (route === "reports" && id && method === "GET") {
       const report = await ownedReport(id, user);
@@ -11669,14 +11670,14 @@ async function handle(request, context) {
       const comments = await db().prepare("SELECT id, body, created_at FROM comments WHERE report_id = ? AND owner = ? ORDER BY created_at, id").bind(id, user).all();
       const attachments = await db().prepare("SELECT id, name, type, size FROM attachments WHERE report_id = ?").bind(id).all();
       const { owner: _owner, payload_hash: _hash, ...safe } = report;
-      return json({ report: { ...safe, kind, attachments: attachments.results, comment_count: comments.results.length }, comments: comments.results });
+      return json({ report: { ...safe, saved: report.saved_at ? 1 : 0, kind, attachments: attachments.results, comment_count: comments.results.length }, comments: comments.results });
     }
     if (route === "reports" && id && method === "PATCH") {
       await ownedReport(id, user);
-      const data = external_exports.object({ archived: external_exports.boolean().optional(), favourite: external_exports.boolean().optional(), is_read: external_exports.boolean().optional() }).strict().parse(await body(request, 2e3));
+      const data = external_exports.object({ archived: external_exports.boolean().optional(), favourite: external_exports.boolean().optional(), is_read: external_exports.boolean().optional(), saved: external_exports.boolean().optional() }).strict().parse(await body(request, 2e3));
       const fields = Object.entries(data);
       if (!fields.length) throw new HttpError(400, "Choose a change to save.");
-      await db().prepare(`UPDATE reports SET ${fields.map(([key]) => `${key} = ?`).join(", ")} WHERE id = ? AND owner = ?`).bind(...fields.map(([, v]) => v ? 1 : 0), id, user).run();
+      await db().prepare(`UPDATE reports SET ${fields.map(([key, v]) => key === "saved" ? v ? "saved_at = coalesce(saved_at, ?)" : "saved_at = ?" : `${key} = ?`).join(", ")} WHERE id = ? AND owner = ?`).bind(...fields.map(([key, v]) => key === "saved" ? v ? (/* @__PURE__ */ new Date()).toISOString() : null : v ? 1 : 0), id, user).run();
       return json({ saved: true });
     }
     if (route === "routine-kinds" && method === "POST") {
