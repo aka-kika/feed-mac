@@ -21,6 +21,6 @@ It checks:
 - Agent icon files are served from `dist/agents/`
 - Restart preserves body, comments, attachments and state
 - An old database upgrades with every row kept, after a backup taken from before the change, also one from the release before ticks; a second start adds no backup; a new database needs none
-- Portable import keeps content, comments, state, the saved time, ticks and attachment bytes, and rejects a bad checksum
+- Export and import: content, comments, state, the saved time, ticks and attachment bytes come back in an empty install; over a report still there, import fills in what it lost and takes nothing away, a second run changes nothing, other content under the same ID stops it, a file missing after a crash comes back on the next run, and a bad checksum is rejected
 
 Left to the operator of a real install: sleep and reboot behaviour of the LaunchAgent, that every publisher on the Feed Mac uses the loopback url, and, after an install with a tunnel, that the public origin lists only `publish_report` for a key that can read on loopback.

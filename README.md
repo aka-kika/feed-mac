@@ -140,7 +140,7 @@ curl -sS http://127.0.0.1:4318/health
 | Data (0700) | `~/Library/Application Support/Feed/`: SQLite, attachments, `config.json` (0600), `logs/` |
 | LaunchAgent | `~/Library/LaunchAgents/com.feed.web.plist` (label from `FEED_LAUNCHAGENT_LABEL`) |
 | Data folder override | `FEED_DATA_DIR` |
-| Upgrade backups | `backups/` in the data folder: a checked copy of the database, made before an upgrade changes it. Delete old ones when you like. |
+| Upgrade backups | `backups/` in the data folder: a copy of the database made before an upgrade changes it. The upgrade stops if the copy's report count differs; that count is all it compares. Delete old ones when you like. |
 
 Restart after a config change: `launchctl kickstart -k "gui/$(id -u)/com.feed.web"`. Notifications through ntfy are optional: add `"ntfy": { "url", "topic", "token", "priority" }` to `config.json`; a push never blocks a publish. Only Feed-tab reports send one; Reports arrive quietly.
 
@@ -150,7 +150,8 @@ Restart after a config change: `launchctl kickstart -k "gui/$(id -u)/com.feed.we
 - [VALIDATION.md](VALIDATION.md): what `npm test` proves.
 - [public/downloads/LOCAL-PUBLISHING.md](public/downloads/LOCAL-PUBLISHING.md): the contract handed to agents.
 - [public/agents/SOURCES.md](public/agents/SOURCES.md): where each source icon comes from.
-- `scripts/backup.mjs <dir>` and `scripts/import.mjs <export.json>`: backup and portable restore. Stop Feed first so the database and attachments are one point in time.
+- `scripts/backup.mjs <dir>`: a copy of the whole data folder, config and password hash included. Stop Feed first so the database and attachments are one point in time.
+- `scripts/export.mjs <export.json>` and `scripts/import.mjs <export.json>`: move reports between installs, or get back what a report lost. The export is one private JSON file, format `feed-portable-v1`: `{ format, reports: [{ report: { ...its columns, saved_at, ticks: [box numbers] }, comments: [{ id, body, created_at }], attachments: [{ id, name, type, size, base64, sha256 }] }] }`. It has no keys or password, and an attachment whose file is gone is left out and listed. Import checks every byte first and only adds: a report already here keeps what it has and gets back its Saved time, star, read mark, ticks, comments and missing attachments; it never takes anything away, and an archived state stays as it is. Same ID with other content stops the import. If it stops after the commit, run it again to finish.
 
 ## Release
 
