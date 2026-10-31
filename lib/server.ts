@@ -68,8 +68,8 @@ function decodeFile(base64: string) {
   if (bytes.length > 2_000_000) throw new HttpError(413, 'Each attachment must be 2 MB or smaller.');
   return bytes;
 }
-export async function publish(key: Publisher, raw: PublishInput, sample = false) {
-  if (!sample) throttle(key, (raw as { run_id?: unknown })?.run_id);
+export async function publish(key: Publisher, raw: PublishInput) {
+  throttle(key, (raw as { run_id?: unknown })?.run_id);
   const data = publishSchema.parse(raw);
   const payloadHash = await hash(JSON.stringify(data));
   const existing = await db().prepare('SELECT id, payload_hash FROM reports WHERE owner = ? AND source = ? AND routine = ? AND run_id = ?').bind(key.owner, key.source, data.routine, data.run_id).first<{ id: string; payload_hash: string }>();
@@ -80,9 +80,9 @@ export async function publish(key: Publisher, raw: PublishInput, sample = false)
   const uploaded: string[] = [];
   try {
     for (const file of files) { const path = `${id}/${file.id}`; await bucket().put(path, file.bytes, { httpMetadata: { contentType: 'application/octet-stream' } }); uploaded.push(path); }
-    const statements = [db().prepare('INSERT INTO reports (id, owner, source, run_id, routine, title, markdown, payload_hash, published_at, received_at, sample) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, key.owner, key.source, data.run_id, data.routine, data.title, data.markdown, payloadHash, data.published_at ? new Date(data.published_at).toISOString() : now, now, sample ? 1 : 0)];
+    const statements = [db().prepare('INSERT INTO reports (id, owner, source, run_id, routine, title, markdown, payload_hash, published_at, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, key.owner, key.source, data.run_id, data.routine, data.title, data.markdown, payloadHash, data.published_at ? new Date(data.published_at).toISOString() : now, now)];
     for (const file of files) statements.push(db().prepare('INSERT INTO attachments (id, report_id, name, type, size, object_key) VALUES (?, ?, ?, ?, ?, ?)').bind(file.id, id, file.name, file.type, file.bytes.length, `${id}/${file.id}`));
-    if (!sample) statements.push(db().prepare('UPDATE agent_keys SET last_used_at = ? WHERE id = ?').bind(now, key.id));
+    statements.push(db().prepare('UPDATE agent_keys SET last_used_at = ? WHERE id = ?').bind(now, key.id));
     await db().batch(statements);
   } catch (error) {
     for (const path of uploaded) { try { await bucket().delete(path); } catch { console.error('Attachment cleanup failed'); } }
@@ -93,8 +93,9 @@ export async function publish(key: Publisher, raw: PublishInput, sample = false)
   // Saved from here on. Nothing below may undo that: a failure only costs the sorting of the ping, never the report or its files.
   let quiet = false;
   // Only news pings the phone; automated reports arrive quietly.
-  if (!sample) try { quiet = (await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first<{ kind: string }>())?.kind === 'report'; } catch { console.error('Could not sort a saved report for its notification'); }
-  if (!sample) { logPublish(key, data.run_id, `created id=${id}${quiet ? ' quiet' : ''}`); if (!quiet) notify({ title: `${key.source} · ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ''}/?report=${id}` }); }
+  try { quiet = (await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first<{ kind: string }>())?.kind === 'report'; } catch { console.error('Could not sort a saved report for its notification'); }
+  logPublish(key, data.run_id, `created id=${id}${quiet ? ' quiet' : ''}`);
+  if (!quiet) notify({ title: `${key.source} · ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ''}/?report=${id}` });
   return { id, duplicate: false };
 }
 // Reports are read on the tailnet origin; a publish that came in over a public HTTPS origin (Funnel) gets that origin back, loopback stays loopback.

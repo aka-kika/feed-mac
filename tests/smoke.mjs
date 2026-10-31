@@ -71,8 +71,8 @@ try{
  // fetch drops a custom Host header, so the publish-origin 404 rule is checked over raw http.
  const rawStatus=(path,host,headers={})=>new Promise((ok,fail)=>{const r=request({host:'127.0.0.1',port,path,headers:{Host:host,...headers}},res=>{res.resume();ok(res.statusCode)});r.on('error',fail);r.end()});
  assert.equal(await rawStatus('/api/reports','publish.example.test',owner),404);assert.equal(await rawStatus('/','publish.example.test',owner),404);assert.equal(await rawStatus('/api/reports','evil.example.test',owner),403);
- assert.equal((await req('/api/keys','POST',{source:'minimax',label:'MiniMax'},owner)).status,201);
- assert.equal((await req('/api/keys','POST',{source:'gemini',label:'Gemini'},owner)).status,201);
+ const {SOURCES}=await load('lib/types.ts');assert.ok(SOURCES.length>=20);for(const {id,name} of SOURCES)assert.equal((await req('/api/keys','POST',{source:id,label:name},owner)).status,201,id);
+ assert.equal((await req('/api/demo/cleanup','POST',{},owner)).status,404,'the sample cleanup is gone');
  assert.equal((await req('/api/keys','POST',{source:'not-an-agent',label:'Nope'},owner)).status,400);
  for(const icon of ['gemini.svg','cursor-light.svg','cursor-dark.svg','kimi-dark.svg','opencode-light.svg'])assert.equal((await req('/agents/'+icon,'GET',null,owner)).status,200,icon);
  const agent={Authorization:'Bearer '+key.token};assert.equal((await req('/api/reports','GET',null,agent)).status,401);

@@ -34,7 +34,7 @@ async function handle(request: Request, context: Context) {
       if (q) { const search = `%${q.replace(/[\\%_]/g, '\\$&')}%`; where.push("(r.title LIKE ? ESCAPE '\\' OR r.markdown LIKE ? ESCAPE '\\' OR r.routine LIKE ? ESCAPE '\\')"); args.push(search, search, search); }
       const cursor = url.searchParams.get('cursor');
       if (cursor) { try { const [date, key] = JSON.parse(atob(cursor)); if (typeof date !== 'string' || typeof key !== 'string') throw Error(); where.push(`(r.${order} < ? OR (r.${order} = ? AND r.id < ?))`); args.push(date, date, key); } catch { throw new HttpError(400, 'Invalid page cursor.'); } }
-      const results = await db().prepare(`SELECT r.id, r.source, r.routine, r.title, substr(r.markdown, 1, 320) AS markdown, r.published_at, r.received_at, r.favourite, r.saved_at, (r.saved_at IS NOT NULL) AS saved, r.archived, r.is_read, r.sample, ${KIND_SQL} AS kind, (SELECT count(*) FROM comments c WHERE c.report_id = r.id) AS comment_count FROM reports r WHERE ${where.join(' AND ')} ORDER BY r.${order} DESC, r.id DESC LIMIT 41`).bind(...args).all();
+      const results = await db().prepare(`SELECT r.id, r.source, r.routine, r.title, substr(r.markdown, 1, 320) AS markdown, r.published_at, r.received_at, r.favourite, r.saved_at, (r.saved_at IS NOT NULL) AS saved, r.archived, r.is_read, ${KIND_SQL} AS kind, (SELECT count(*) FROM comments c WHERE c.report_id = r.id) AS comment_count FROM reports r WHERE ${where.join(' AND ')} ORDER BY r.${order} DESC, r.id DESC LIMIT 41`).bind(...args).all();
       const more = results.results.length > 40, items = results.results.slice(0, 40), last = items.at(-1);
       const routines = await db().prepare(`SELECT DISTINCT r.source, r.routine, ${KIND_SQL} AS kind FROM reports r WHERE r.owner = ? AND r.sample = 0 ORDER BY r.routine`).bind(user).all();
       const counts = await db().prepare(`SELECT count(*) AS total, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 THEN 1 ELSE 0 END),0) AS unread, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'news' THEN 1 ELSE 0 END),0) AS unread_news, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'report' THEN 1 ELSE 0 END),0) AS unread_reports FROM reports r WHERE r.owner = ? AND r.sample = 0`).bind(user).first();
@@ -89,7 +89,7 @@ async function handle(request: Request, context: Context) {
       return json({ comment }, 201);
     }
     if (route === 'comments' && id && method === 'DELETE') { await db().prepare('DELETE FROM comments WHERE id = ? AND owner = ?').bind(id, user).run(); return json({ deleted: true }); }
-    if (route === 'keys' && method === 'GET') { const result = await db().prepare('SELECT id, source, label, created_at, last_used_at FROM agent_keys WHERE owner = ? ORDER BY created_at DESC').bind(user).all(); return json({ keys: result.results, delivery_ready: true, read_sources: readSources }); }
+    if (route === 'keys' && method === 'GET') { const result = await db().prepare('SELECT id, source, label, created_at, last_used_at FROM agent_keys WHERE owner = ? ORDER BY created_at DESC').bind(user).all(); return json({ keys: result.results, read_sources: readSources }); }
     if (route === 'keys' && method === 'POST') {
 
       const data = z.object({ source: sourceSchema, label: z.string().trim().min(1).max(80) }).strict().parse(await body(request, 2000));
@@ -103,10 +103,6 @@ async function handle(request: Request, context: Context) {
       if (!file) throw new HttpError(404, 'Attachment not found.');
       const object = await bucket().get(file.object_key); if (!object) throw new HttpError(404, 'Attachment is unavailable.');
       return new Response(object.body, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="attachment"; filename*=UTF-8''${encodeURIComponent(file.name)}`, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' } });
-    }
-    if (route === 'demo' && id === 'cleanup' && method === 'POST') {
-      await db().prepare("DELETE FROM reports WHERE owner = ? AND sample = 1 AND run_id IN ('sample-welcome-v1', 'sample-rich-markdown-v2')").bind(user).run();
-      return json({ removed: true });
     }
     throw new HttpError(404, 'Not found.');
   } catch (error) { return failure(error); }

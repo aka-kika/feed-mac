@@ -19,7 +19,7 @@ export const SOURCES_BY_NAME = [...SOURCES].sort((a, b) => a.name.localeCompare(
 export type SourcePrefs = Record<string, boolean>;
 export type Theme = 'light' | 'soft-dark' | 'system';
 export type Attachment = { id: string; name: string; size: number; type: string };
-export type Report = { id: string; source: SourceId; routine: string; title: string; markdown: string; published_at: string; received_at: string; archived: number; favourite: number; saved: number; saved_at: string | null; is_read: number; sample: number; kind: Kind; comment_count: number; attachments: Attachment[]; ticks: number[] };
+export type Report = { id: string; source: SourceId; routine: string; title: string; markdown: string; published_at: string; received_at: string; archived: number; favourite: number; saved: number; saved_at: string | null; is_read: number; kind: Kind; comment_count: number; attachments: Attachment[]; ticks: number[] };
 export type Comment = { id: string; body: string; created_at: string };
 export type AgentKey = { id: string; source: SourceId; label: string; created_at: string; last_used_at: string | null };
 export const sourceName = (id: string) => SOURCES.find(s => s.id === id)?.name ?? (id === 'muse' ? 'Muse · Meta AI' : id);

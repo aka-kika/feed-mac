@@ -23348,8 +23348,8 @@ function decodeFile(base642) {
   if (bytes.length > 2e6) throw new HttpError(413, "Each attachment must be 2 MB or smaller.");
   return bytes;
 }
-async function publish(key, raw, sample = false) {
-  if (!sample) throttle(key, raw?.run_id);
+async function publish(key, raw) {
+  throttle(key, raw?.run_id);
   const data = publishSchema.parse(raw);
   const payloadHash = await hash(JSON.stringify(data));
   const existing = await db().prepare("SELECT id, payload_hash FROM reports WHERE owner = ? AND source = ? AND routine = ? AND run_id = ?").bind(key.owner, key.source, data.routine, data.run_id).first();
@@ -23371,9 +23371,9 @@ async function publish(key, raw, sample = false) {
       await bucket().put(path2, file.bytes, { httpMetadata: { contentType: "application/octet-stream" } });
       uploaded.push(path2);
     }
-    const statements = [db().prepare("INSERT INTO reports (id, owner, source, run_id, routine, title, markdown, payload_hash, published_at, received_at, sample) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, key.owner, key.source, data.run_id, data.routine, data.title, data.markdown, payloadHash, data.published_at ? new Date(data.published_at).toISOString() : now, now, sample ? 1 : 0)];
+    const statements = [db().prepare("INSERT INTO reports (id, owner, source, run_id, routine, title, markdown, payload_hash, published_at, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, key.owner, key.source, data.run_id, data.routine, data.title, data.markdown, payloadHash, data.published_at ? new Date(data.published_at).toISOString() : now, now)];
     for (const file of files) statements.push(db().prepare("INSERT INTO attachments (id, report_id, name, type, size, object_key) VALUES (?, ?, ?, ?, ?, ?)").bind(file.id, id, file.name, file.type, file.bytes.length, `${id}/${file.id}`));
-    if (!sample) statements.push(db().prepare("UPDATE agent_keys SET last_used_at = ? WHERE id = ?").bind(now, key.id));
+    statements.push(db().prepare("UPDATE agent_keys SET last_used_at = ? WHERE id = ?").bind(now, key.id));
     await db().batch(statements);
   } catch (error2) {
     for (const path2 of uploaded) {
@@ -23391,15 +23391,13 @@ async function publish(key, raw, sample = false) {
     throw error2;
   }
   let quiet = false;
-  if (!sample) try {
+  try {
     quiet = (await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first())?.kind === "report";
   } catch {
     console.error("Could not sort a saved report for its notification");
   }
-  if (!sample) {
-    logPublish(key, data.run_id, `created id=${id}${quiet ? " quiet" : ""}`);
-    if (!quiet) notify({ title: `${key.source} \xB7 ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ""}/?report=${id}` });
-  }
+  logPublish(key, data.run_id, `created id=${id}${quiet ? " quiet" : ""}`);
+  if (!quiet) notify({ title: `${key.source} \xB7 ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ""}/?report=${id}` });
   return { id, duplicate: false };
 }
 function reportUrl(request, id) {
@@ -23466,7 +23464,7 @@ async function handle2(request, context) {
           throw new HttpError(400, "Invalid page cursor.");
         }
       }
-      const results = await db().prepare(`SELECT r.id, r.source, r.routine, r.title, substr(r.markdown, 1, 320) AS markdown, r.published_at, r.received_at, r.favourite, r.saved_at, (r.saved_at IS NOT NULL) AS saved, r.archived, r.is_read, r.sample, ${KIND_SQL} AS kind, (SELECT count(*) FROM comments c WHERE c.report_id = r.id) AS comment_count FROM reports r WHERE ${where.join(" AND ")} ORDER BY r.${order2} DESC, r.id DESC LIMIT 41`).bind(...args).all();
+      const results = await db().prepare(`SELECT r.id, r.source, r.routine, r.title, substr(r.markdown, 1, 320) AS markdown, r.published_at, r.received_at, r.favourite, r.saved_at, (r.saved_at IS NOT NULL) AS saved, r.archived, r.is_read, ${KIND_SQL} AS kind, (SELECT count(*) FROM comments c WHERE c.report_id = r.id) AS comment_count FROM reports r WHERE ${where.join(" AND ")} ORDER BY r.${order2} DESC, r.id DESC LIMIT 41`).bind(...args).all();
       const more = results.results.length > 40, items = results.results.slice(0, 40), last = items.at(-1);
       const routines = await db().prepare(`SELECT DISTINCT r.source, r.routine, ${KIND_SQL} AS kind FROM reports r WHERE r.owner = ? AND r.sample = 0 ORDER BY r.routine`).bind(user).all();
       const counts = await db().prepare(`SELECT count(*) AS total, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 THEN 1 ELSE 0 END),0) AS unread, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'news' THEN 1 ELSE 0 END),0) AS unread_news, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'report' THEN 1 ELSE 0 END),0) AS unread_reports FROM reports r WHERE r.owner = ? AND r.sample = 0`).bind(user).first();
@@ -23525,7 +23523,7 @@ async function handle2(request, context) {
     }
     if (route === "keys" && method === "GET") {
       const result = await db().prepare("SELECT id, source, label, created_at, last_used_at FROM agent_keys WHERE owner = ? ORDER BY created_at DESC").bind(user).all();
-      return json({ keys: result.results, delivery_ready: true, read_sources: readSources2 });
+      return json({ keys: result.results, read_sources: readSources2 });
     }
     if (route === "keys" && method === "POST") {
       const data = external_exports.object({ source: sourceSchema, label: external_exports.string().trim().min(1).max(80) }).strict().parse(await body(request, 2e3));
@@ -23543,10 +23541,6 @@ async function handle2(request, context) {
       const object3 = await bucket().get(file.object_key);
       if (!object3) throw new HttpError(404, "Attachment is unavailable.");
       return new Response(object3.body, { headers: { "Content-Type": "application/octet-stream", "Content-Disposition": `attachment; filename="attachment"; filename*=UTF-8''${encodeURIComponent(file.name)}`, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" } });
-    }
-    if (route === "demo" && id === "cleanup" && method === "POST") {
-      await db().prepare("DELETE FROM reports WHERE owner = ? AND sample = 1 AND run_id IN ('sample-welcome-v1', 'sample-rich-markdown-v2')").bind(user).run();
-      return json({ removed: true });
     }
     throw new HttpError(404, "Not found.");
   } catch (error2) {
