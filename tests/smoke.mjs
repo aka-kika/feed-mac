@@ -57,6 +57,7 @@ try{
  assert.equal(await chunkedLogin(new URLSearchParams({password}).toString()),303,'a normal chunked sign-in works');
  const login=await fetch(origin+'/login',{method:'POST',body:new URLSearchParams({password}),redirect:'manual'});assert.equal(login.status,303);
  const cookie=login.headers.get('set-cookie').split(';')[0],owner={Cookie:cookie};
+ assert.equal((await req('/login','GET',null,owner)).headers.get('location'),'/','signed in, the sign-in page moves on');assert.equal((await req('/login?next='+wantedNext,'GET',null,owner)).headers.get('location'),wantedPath);
  assert.equal((await req('/','GET',null,owner)).status,200);
  const bundle=await req('/assets/app.js','GET',null,owner);assert.equal(bundle.status,200);
  // Static files are kept by the browser and checked each time, so a reload costs one small request. Still behind the session, and the API is never kept.

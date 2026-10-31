@@ -69,6 +69,8 @@ createServer(async(req,res)=>{
   const authenticated=session(req.headers.cookie||'');
   if(url.pathname==='/login'){
    const next=nextOf(url);
+   // Already signed in, as when Back lands here: there is nothing to unlock.
+   if(authenticated&&(req.method==='GET'||req.method==='HEAD'))return send(303,'',{...html,Location:next??'/'});
    if(req.method==='GET'||req.method==='HEAD')return send(200,req.method==='HEAD'?undefined:login('',next),html);
    if(req.method!=='POST')return send(405,'Method not allowed',{'Content-Type':'text/plain; charset=utf-8','Allow':'GET, HEAD, POST'});
    if(Date.now()<blockedUntil)return send(429,login('Try again shortly.',next),{...html,'Retry-After':'30'});
