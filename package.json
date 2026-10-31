@@ -9,6 +9,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "node server/main.mjs",
+    "pretest": "npm run build",
     "test": "node tests/smoke.mjs"
   },
   "dependencies": {

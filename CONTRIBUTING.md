@@ -8,7 +8,7 @@ replies come when they come.
 ```bash
 npm install
 npm run build     # esbuild: dist/ for the browser, server/routes.mjs for Node
-npm test          # tests/smoke.mjs against a throwaway data folder
+npm test          # builds, then tests/smoke.mjs against a throwaway data folder
 npm start         # node server/main.mjs on 127.0.0.1:4318
 ```
 

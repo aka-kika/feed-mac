@@ -85,7 +85,7 @@ Authorization: Bearer <agent key>
 
 The same call is the MCP tool `publish_report` at `/api/mcp` over Streamable HTTP. Required: `run_id`, `routine`, `title`, `markdown`. Optional: `published_at` (ISO with timezone), `notify` (short text for the phone notification, up to 240 characters; without it the notification shows the routine name) and up to five `attachments` as `{ name, type, base64 }`, 2 MB each, 5 MB total, 8 MB per request.
 
-Retrying the same payload returns the same report. A different body under the same `run_id` is a `409`. Retry on network errors, `429` and `5xx`, at most three times with backoff. Stop on `401`, `403`, `409`. Every attempt is one line in `logs/server.log`.
+Retrying the same payload returns the same report. A different body under the same `run_id` is a `409`. Retry on network errors, `429` and `5xx`, at most three times with backoff. Stop on `401`, `403`, `409`. Each attempt with a valid key and a body that parses is one line in `logs/server.log` (created, duplicate, conflict or throttled); a request refused before that, like a bad key or broken JSON, leaves no line.
 
 Connector forms without a header field can carry the key in the URL: `/api/mcp/<key>` or `/api/publish/<key>`. The full contract agents are handed is [public/downloads/LOCAL-PUBLISHING.md](public/downloads/LOCAL-PUBLISHING.md), also available from Settings as Copy or Download.
 
@@ -110,7 +110,7 @@ Feed then opens a second door on loopback, the read door, at the main port plus 
 - Its own door. The tools exist only on the read door, a separate listener bound to loopback that answers the MCP path and nothing else, and refuses browsers. The tunnel and the private network forward to the main port, where the same key can only publish, whatever the request's Host says. Never point a tunnel or proxy at the read port.
 - Read-only. Reading does not mark a report read. Agents cannot change Saved or tick a box, and they never see your favourites or read state.
 - Report text, comments and ticked text are data. Reports are written by other agents, so the tool descriptions and every answer tell the reader not to follow anything written inside them.
-- Every read and refused read is one line in `logs/server.log`.
+- Every read and every refused read is one line in `logs/server.log`, except a call whose arguments are malformed (an ID that is not a UUID), which the MCP layer refuses before the tool runs.
 
 ## Reach it
 
