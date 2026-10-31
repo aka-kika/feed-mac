@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <!-- The solid tile for iOS and for maskable icons: iOS would fill transparency with black, so the torn edge sits on the top band's peach. -->
+  <rect width="192" height="192" fill="#F2BBA3"/>
+  <path d="M0 34H192V164L176 178 160 164 144 178 128 164 112 178 96 164 80 178 64 164 48 178 32 164 16 178 0 164Z" fill="#F7F2E8"/>
+  <rect x="34" y="60" width="124" height="11" rx="5.5" fill="#39383F"/>
+  <rect x="34" y="88" width="124" height="11" rx="5.5" fill="#B9B5AD"/>
+  <rect x="34" y="114" width="84" height="11" rx="5.5" fill="#B9B5AD"/>
+</svg>

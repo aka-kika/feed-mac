@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <defs><clipPath id="top"><path d="M32 7H160C177.7 7 192 21.3 192 39V41H0V39C0 21.3 14.3 7 32 7Z"/></clipPath></defs>
+  <path d="M32 7H160C177.7 7 192 21.3 192 39V171L176 185 160 171 144 185 128 171 112 185 96 171 80 185 64 171 48 185 32 171 16 185 0 171V39C0 21.3 14.3 7 32 7Z" fill="#F7F2E8"/>
+  <rect y="7" width="192" height="34" fill="#F2BBA3" clip-path="url(#top)"/>
+  <rect x="34" y="67" width="124" height="11" rx="5.5" fill="#39383F"/>
+  <rect x="34" y="95" width="124" height="11" rx="5.5" fill="#B9B5AD"/>
+  <rect x="34" y="121" width="84" height="11" rx="5.5" fill="#B9B5AD"/>
+</svg>

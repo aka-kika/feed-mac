@@ -19,6 +19,7 @@ It checks:
 - Read tools exist only on the read door, a second loopback listener that opens only when a source may read. Refused, whatever the key, on the main port with a loopback Host, on the public publish origin (with the header and the path-token form), on the private-network origin, and on the read door when a request carries a proxy header (`Cf-Connecting-Ip`, `Cf-Ray`, `X-Forwarded-For`, `Forwarded`, `Tailscale-Funnel-Request`); the public origin still publishes
 - The read door answers only the MCP path: pages, sign-in, the owner API, the health check and plain publishing are 404, an unknown Host and any browser request are 403. Links it hands out open the app, and the instructions carry its address also when Settings is opened over the private network
 - Agent icon files are served from `dist/agents/`
+- Every icon in the manifest is served, and the apple touch icon has no transparency
 - Restart preserves body, comments, attachments and state
 - An old database upgrades with every row kept, after a backup taken from before the change, also one from the release before ticks; a second start adds no backup; a new database needs none
 - Export and import: content, comments, state, the saved time, ticks and attachment bytes come back in an empty install; over a report still there, import fills in what it lost and takes nothing away, a second run changes nothing, other content under the same ID stops it, a file missing after a crash comes back on the next run, and a bad checksum is rejected

@@ -11,7 +11,7 @@ const links = [
 ];
 export default function About() {
   return <section className="about">
-    <img className="about-icon" src="/icon-192.png" alt="" width={76} height={76}/>
+    <img className="about-icon" src="/icons/feed-v3-192.png" alt="" width={76} height={76}/>
     <h3>Feed{version && <span className="about-version">{version}</span>}</h3>
     <p className="about-line">Your agents’ routines, in one quiet place.</p>
     <div className="about-links">{links.map(l => <a key={l.href} className="about-link" href={l.href} target="_blank" rel="noopener noreferrer" aria-label={l.label} title={l.label}>{l.mark}</a>)}</div>

@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/icon.png" width="128" alt="Feed icon: three cream rounded bars stacked wide to narrow on a slate blue rounded square"></p>
+<p align="center"><img src="docs/icon.png" width="128" alt="Feed icon: a torn-off paper receipt with a peach band on top, three printed lines and a zigzag bottom edge"></p>
 
 # Feed
 
@@ -8,7 +8,7 @@
 <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
 <img alt="SQLite" src="https://img.shields.io/badge/data-SQLite%20%2B%20files-555555">
 <img alt="MCP server" src="https://img.shields.io/badge/MCP-publish%20and%20read-6E56CF">
-<img alt="Version" src="https://img.shields.io/badge/release-1.6.0-blue">
+<img alt="Version" src="https://img.shields.io/badge/release-1.6.1-blue">
 <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
@@ -156,7 +156,7 @@ Restart after a config change: `launchctl kickstart -k "gui/$(id -u)/com.feed.we
 ## Release
 
 <!-- SF Symbol: shippingbox -->
-Bump `version` in `package.json`, `npm run build`, `npm test`, refresh `SHA256SUMS` (`git ls-files | grep -v SHA256SUMS | xargs shasum -a 256 > SHA256SUMS`), commit, tag. The built `dist/` and `server/routes.mjs` are committed on purpose so an install never needs a build step. A pre-commit hook (`.githooks/`, enable with `git config core.hooksPath .githooks`) strips generator metadata from every staged image and stamps the author credit; third-party agent marks are left alone.
+Bump `version` in `package.json`, `npm run build`, `npm test`, refresh `SHA256SUMS` (`git ls-files | grep -v SHA256SUMS | xargs shasum -a 256 > SHA256SUMS`), commit, tag. The icons are drawn from `docs/icon/` by `scripts/make-icons.sh`. The built `dist/` and `server/routes.mjs` are committed on purpose so an install never needs a build step. A pre-commit hook (`.githooks/`, enable with `git config core.hooksPath .githooks`) strips generator metadata from every staged image and stamps the author credit; third-party agent marks are left alone.
 
 ## Contributing
 

@@ -37,7 +37,7 @@ try{
  assert.ok(((await req('/login')).headers.get('content-type')||'').includes('text/html'));
  assert.equal((await req('/login','HEAD')).status,200);
  assert.equal((await req('/favicon.ico')).status,200);
- assert.equal((await req('/icons/feed-v2-32.png')).status,200);
+ assert.equal((await req('/icons/feed-v3-32.png')).status,200);
  assert.equal((await req('/assets/app.js')).status,303);
  // The public icons folder is a fence: no way out of it to the app or the docs without a session.
  for(const path of ['/icons/..%2fassets/app.js','/icons/..%2findex.html','/icons/..%2fdownloads/LOCAL-PUBLISHING.md','/icons/%2e%2e%2fassets/app.js'])assert.equal((await req(path)).status,303,path);
@@ -64,9 +64,11 @@ try{
  const tag=bundle.headers.get('etag');assert.ok(tag,'has an ETag');assert.equal(bundle.headers.get('cache-control'),'private, no-cache');
  const unchanged=await req('/assets/app.js','GET',null,{...owner,'If-None-Match':tag});assert.equal(unchanged.status,304);assert.equal((await unchanged.text()).length,0);assert.equal(unchanged.headers.get('etag'),tag);
  assert.equal((await req('/assets/app.js','GET',null,{...owner,'If-None-Match':'"other"'})).status,200);assert.equal((await req('/assets/app.js','GET',null,{'If-None-Match':tag})).status,303,'no session, no file');
- const icon=await req('/icons/feed-v2-32.png');assert.equal((await req('/icons/feed-v2-32.png','GET',null,{'If-None-Match':icon.headers.get('etag')})).status,304);
+ const icon=await req('/icons/feed-v3-32.png');assert.equal((await req('/icons/feed-v3-32.png','GET',null,{'If-None-Match':icon.headers.get('etag')})).status,304);
  assert.equal((await req('/api/reports','GET',null,owner)).headers.get('cache-control'),'private, no-store');assert.equal((await req('/login')).headers.get('cache-control'),'no-store');
- assert.equal((await req('/icons/feed-v2-180.png','GET',null,owner)).status,200);
+ assert.equal((await req('/icons/feed-v3-180.png','GET',null,owner)).status,200);
+ for(const {src} of (await (await req('/manifest.webmanifest','GET',null,owner)).json()).icons)assert.equal((await req(src)).status,200,src);
+ assert.equal(Buffer.from(await (await req('/apple-touch-icon.png')).arrayBuffer())[25],2,'the apple touch icon has no transparency: iOS would fill it with black');
  assert.equal((await req('/api/keys','POST',{source:'aka',label:'Aka'}, {...owner,Origin:'https://evil.test'})).status,403);
  const keyResponse=await req('/api/keys','POST',{source:'aka',label:'Aka'},owner);assert.equal(keyResponse.status,201);const key=await keyResponse.json();assert.ok(!key.instructions.includes('OAI-Sites-Authorization'));assert.ok(key.instructions.includes('https://publish.example.test/api/mcp/'+key.token),'path-token form');assert.ok(key.instructions.includes('30 publishes per key per minute'),'rate limit');
  // fetch drops a custom Host header, so the publish-origin 404 rule is checked over raw http.
@@ -208,7 +210,7 @@ try{
  assert.deepEqual(await tools(local,readKey.token),['publish_report'],'the main port is publish-only, even with a loopback Host');assert.deepEqual(await tools(`localhost:${port}`,readKey.token),['publish_report']);
  // The read door answers the MCP path and nothing else: no session, no pages, no publish over plain HTTP, and no browser.
  const atDoor=(path,method='GET',headers={},host=reader)=>new Promise((ok,fail)=>{const r=request({host:'127.0.0.1',port:readPort,path,method,headers:{Host:host,...headers}},res=>{res.resume();ok(res.statusCode)});r.on('error',fail);r.end()});
- for(const path of ['/','/login','/health','/api/reports','/api/keys','/api/publish','/icons/feed-v2-32.png'])assert.equal(await atDoor(path,'GET',{Cookie:cookie}),404,'the read door has no '+path);
+ for(const path of ['/','/login','/health','/api/reports','/api/keys','/api/publish','/icons/feed-v3-32.png'])assert.equal(await atDoor(path,'GET',{Cookie:cookie}),404,'the read door has no '+path);
  assert.equal(await atDoor('/api/mcp','POST',{},'evil.example.test'),403,'unknown host');assert.equal(await atDoor('/api/mcp','POST',{},`publish.example.test`),403);
  assert.equal((await rpc(reader,readKey.token,{method:'tools/list'},{Origin:'https://evil.test'})).status,403,'a web page cannot call the read door');assert.equal((await rpc(reader,readKey.token,{method:'tools/list'},{Origin:`http://${reader}`})).status,403);
  const doorPublish=JSON.parse(JSON.parse((await toolCall(reader,readKey.token,'publish_report',{run_id:'read-door',routine:'Read door',title:'Through the read door',markdown:'Published on the read door'})).text).result.content[0].text);assert.ok(doorPublish.url.startsWith(origin+'/?report=')||doorPublish.url.startsWith('https://tailnet.example.test/'),'the link opens the app, not the read door: '+doorPublish.url);assert.ok(!doorPublish.url.includes(String(readPort)));
