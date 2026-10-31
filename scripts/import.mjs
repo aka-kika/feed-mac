@@ -16,6 +16,8 @@ const seen=new Set();for(const {report:r,comments,attachments} of input.reports)
  for(const k of ['favourite','is_read','sample','archived'])if(![0,1].includes(r[k]))throw Error('Invalid report state');
  // Exports from before Saved have no saved_at.
  if(r.saved_at!==undefined&&r.saved_at!==null&&typeof r.saved_at!=='string')throw Error('Invalid report state');
+ // Exports from before ticks have none.
+ if(r.ticks!==undefined&&!(Array.isArray(r.ticks)&&r.ticks.every(b=>Number.isInteger(b)&&b>0)))throw Error('Invalid report state');
  for(const c of comments)if(!id(c.id)||typeof c.body!=='string'||typeof c.created_at!=='string')throw Error('Invalid comment');
  for(const a of attachments){if(!id(a.id)||typeof a.name!=='string'||typeof a.type!=='string'||typeof a.base64!=='string')throw Error('Invalid attachment');const b=Buffer.from(a.base64,'base64');if(b.length!==a.size||hash(b)!==a.sha256)throw Error('Attachment checksum mismatch');}
 }
@@ -28,6 +30,7 @@ try{
   // Original request hash is private and absent from owner API export. Preserve run IDs;
   // historical deliveries intentionally conflict rather than falsely deduplicate different content.
   sql.prepare(`INSERT INTO reports (${columns.join(',')},saved_at,owner,payload_hash) VALUES (${columns.map(()=>'?').join(',')},?,?,?)`).run(...columns.map(k=>r[k]),r.saved_at??null,'local-owner','imported:'+hash(r.markdown));
+  for(const box of new Set(r.ticks??[]))sql.prepare('INSERT INTO report_ticks (report_id,box,ticked_at) VALUES (?,?,?)').run(r.id,box,new Date().toISOString());
   for(const c of comments)sql.prepare('INSERT INTO comments (id,report_id,owner,body,created_at) VALUES (?,?,?,?,?)').run(c.id,r.id,'local-owner',c.body,c.created_at);
   for(const a of attachments)sql.prepare('INSERT INTO attachments (id,report_id,name,type,size,object_key) VALUES (?,?,?,?,?,?)').run(a.id,r.id,a.name,a.type,a.size,r.id+'/'+a.id);
   added++;

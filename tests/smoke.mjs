@@ -91,7 +91,21 @@ try{
  assert.deepEqual((await titles('saved'))[0],['News'],'unstarring leaves Saved');
  let pager;for(let i=0;i<41;i++){if(i%25===0)pager={Authorization:'Bearer '+(await(await req('/api/keys','POST',{source:'aka',label:'Paging'},owner)).json()).token};const page=await(await req('/api/publish','POST',{run_id:'page-'+i,routine:'Saved paging',title:'Page '+i,markdown:'Paging'},pager)).json();await new Promise(r=>setTimeout(r,2));assert.equal((await req('/api/reports/'+page.id,'PATCH',{saved:true},owner)).status,200);}
  const [first,next]=await titles('saved');assert.equal(first.length,40);assert.equal(first[0],'Page 40');assert.ok(next);const [rest,end]=await titles('saved',next);assert.deepEqual(rest,['Page 0','News']);assert.equal(end,null);
- await stop();await start();detail=await(await req('/api/reports/'+report.id,'GET',null,owner)).json();assert.equal(detail.report.markdown,payload.markdown);assert.equal(detail.report.archived,1);assert.equal(detail.comments[0].body,comment.body);assert.equal((await list('saved')).reports[0].title,'Page 40');await stop();
+ // Ticks: a box in a report can be ticked, by the owner only, and the report's text never changes. A "- [ ]" in a code block is no box, and a box the report wrote as [x] stays as written.
+ const tickPayload={run_id:'post-ideas',routine:'Post ideas',title:'Post ideas, 31 Oct',markdown:'Intro \u{1F600} so an offset is not a byte count.\n\n- [ ] Idea 1: first\n\n**X**\n\n```\npost one\n- [ ] not a box, in a code block\n```\n\n**Threads:** paste as-is.\n\n---\n\n- [ ] Idea 2: second\n\nReply line.\n\n- [x] Done by the report\n\n## Held back\n\nNot part of any idea.\n\n- [ ] Idea 3: parent\n  - [ ] Nested child\n    under the child\n'};
+ const tickReport=(await(await req('/api/publish','POST',tickPayload,pager)).json()).id,tick=(box,ticked=true,headers=owner,id=tickReport)=>req('/api/ticks','POST',{report_id:id,box,ticked},headers),ticksOf=async()=>(await(await req('/api/reports/'+tickReport,'GET',null,owner)).json()).report;
+ assert.deepEqual((await ticksOf()).ticks,[]);
+ assert.equal((await tick(1,true,{...owner,Origin:'https://evil.test'})).status,403);assert.equal((await tick(1,true,agent)).status,401);assert.equal((await tick(1,true,{})).status,401);
+ for(const box of [3,6,0,-1,1.5,'1'])assert.equal((await tick(box)).status,400,'box '+box);
+ assert.equal((await tick(1,true,owner,report.id)).status,400,'a report without boxes');assert.equal((await tick(1,true,owner,randomUUID())).status,404);
+ assert.equal((await req('/api/ticks','POST',{report_id:tickReport,box:1,ticked:true,by:'x'},owner)).status,400);
+ assert.deepEqual((await ticksOf()).ticks,[],'a refused tick saves nothing');
+ assert.equal((await tick(4)).status,200);assert.equal((await tick(1)).status,200);assert.equal((await tick(1)).status,200);
+ assert.deepEqual((await ticksOf()).ticks,[1,4]);assert.equal((await ticksOf()).markdown,tickPayload.markdown,'the report text never changes');
+ r=await req('/api/publish','POST',tickPayload,pager);assert.equal(r.status,200);assert.equal((await r.json()).id,tickReport,'a retry still finds the report');
+ assert.equal((await tick(4,false)).status,200);assert.equal((await tick(4,false)).status,200);assert.deepEqual((await ticksOf()).ticks,[1]);
+ assert.equal((await tick(5)).status,200);
+ await stop();await start();assert.deepEqual((await ticksOf()).ticks,[1,5],'ticks stay after a restart');detail=await(await req('/api/reports/'+report.id,'GET',null,owner)).json();assert.equal(detail.report.markdown,payload.markdown);assert.equal(detail.report.archived,1);assert.equal(detail.comments[0].body,comment.body);assert.equal((await list('saved')).reports[0].title,'Page 40');await stop();
  // An old database upgrades with nothing lost and a backup first; a second start changes nothing; a new database needs no backup.
  const oldData=mkdtempSync(join(tmpdir(),'feed-upgrade-test-'));
  try{
@@ -101,11 +115,22 @@ try{
   old.prepare("INSERT INTO reports (id,owner,source,run_id,routine,title,markdown,payload_hash,published_at,received_at,favourite) VALUES (?,'local-owner','aka','old-run','Old routine','Old report','Old body','hash',?,?,1)").run(oldId,now,now);
   old.prepare("INSERT INTO comments (id,report_id,owner,body,created_at) VALUES (?,?,'local-owner','Old comment',?)").run(randomUUID(),oldId,now);old.close();
   const opened=()=>{const run=spawnSync(process.execPath,['--input-type=module','-e',"import {sql} from './server/storage.mjs';console.log(JSON.stringify({r:sql.prepare('SELECT * FROM reports').all(),c:sql.prepare('SELECT count(*) n FROM comments').get().n,m:sql.prepare('SELECT count(*) n FROM migrations').get().n}))"],{env:{...process.env,FEED_DATA_DIR:oldData},encoding:'utf8'});assert.equal(run.status,0,run.stderr);return JSON.parse(run.stdout)};
-  const after=opened();assert.equal(after.m,4);assert.equal(after.c,1);assert.equal(after.r.length,1);assert.equal(after.r[0].markdown,'Old body');assert.equal(after.r[0].favourite,1);assert.equal(after.r[0].saved_at,null);
+  const after=opened();assert.equal(after.m,5);assert.equal(after.c,1);assert.equal(after.r.length,1);assert.equal(after.r[0].markdown,'Old body');assert.equal(after.r[0].favourite,1);assert.equal(after.r[0].saved_at,null);
   const backups=readdirSync(join(oldData,'backups'));assert.equal(backups.length,1);assert.match(backups[0],/^feed-before-0003_saved-\d+\.sqlite$/);
   const copy=new DatabaseSync(join(oldData,'backups',backups[0]),{readOnly:true});assert.equal(copy.prepare('SELECT markdown FROM reports').get().markdown,'Old body');assert.ok(!copy.prepare('PRAGMA table_info(reports)').all().some(c=>c.name==='saved_at'),'the backup is from before the change');copy.close();
   opened();assert.equal(readdirSync(join(oldData,'backups')).length,1);
   assert.ok(!existsSync(join(data,'backups')),'a new database needs no backup');
+  // A database from the release before ticks keeps every row, gets a backup first, and starts with no ticks.
+  const prior=mkdtempSync(join(tmpdir(),'feed-upgrade-test-'));
+  try{
+   const db=new DatabaseSync(join(prior,'feed.sqlite')),priorId=randomUUID();
+   db.exec('CREATE TABLE migrations (name TEXT PRIMARY KEY)');
+   for(const name of ['0000_special_shard.sql','0001_lowly_stephen_strange.sql','0002_routine_kinds.sql','0003_saved.sql']){db.exec(readFileSync(new URL('../drizzle/'+name,import.meta.url),'utf8'));db.prepare('INSERT INTO migrations VALUES (?)').run(name);}
+   db.prepare("INSERT INTO reports (id,owner,source,run_id,routine,title,markdown,payload_hash,published_at,received_at,saved_at) VALUES (?,'local-owner','aka','prior-run','Prior','Prior','- [ ] Prior box','hash',?,?,?)").run(priorId,now,now,now);db.close();
+   const run=spawnSync(process.execPath,['--input-type=module','-e',"import {sql} from './server/storage.mjs';console.log(JSON.stringify({r:sql.prepare('SELECT markdown,saved_at FROM reports').all(),t:sql.prepare('SELECT count(*) n FROM report_ticks').get().n}))"],{env:{...process.env,FEED_DATA_DIR:prior},encoding:'utf8'});assert.equal(run.status,0,run.stderr);
+   const state=JSON.parse(run.stdout);assert.deepEqual(state,{r:[{markdown:'- [ ] Prior box',saved_at:now}],t:0});
+   assert.match(readdirSync(join(prior,'backups'))[0],/^feed-before-0004_ticks-\d+\.sqlite$/);
+  }finally{rmSync(prior,{recursive:true,force:true})}
  }finally{rmSync(oldData,{recursive:true,force:true})}
  // Reading: off until a source is on the allow list, and then only on a direct loopback call. The public door and the private-network door stay publish-only whatever the key.
  const baseConfig=JSON.parse(readFileSync(join(data,'config.json'),'utf8'));
@@ -172,10 +197,10 @@ try{
   for(let i=0;i<2;i++){const run=spawnSync(process.execPath,['scripts/import.mjs',fixture],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.equal(run.status,0,run.stderr);assert.equal(JSON.parse(run.stdout).total,1);}
   const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(join(migration,'data/feed.sqlite'));assert.equal(db.prepare('SELECT archived FROM reports').get().archived,1);assert.equal(db.prepare('SELECT count(*) n FROM comments').get().n,1);db.close();
   assert.equal(readFileSync(join(migration,'data/attachments',report.id,a.id),'utf8'),file);
-  const savedTime=new Date().toISOString(),savedExport=join(migration,'saved.json');writeFileSync(savedExport,JSON.stringify({format:'feed-portable-v1',reports:[{report:{...detail.report,id:randomUUID(),run_id:'saved-import',saved_at:savedTime},comments:[],attachments:[]}]}));
+  const savedTime=new Date().toISOString(),savedExport=join(migration,'saved.json');writeFileSync(savedExport,JSON.stringify({format:'feed-portable-v1',reports:[{report:{...detail.report,id:randomUUID(),run_id:'saved-import',saved_at:savedTime,ticks:[2,1]},comments:[],attachments:[]}]}));
   const savedRun=spawnSync(process.execPath,['scripts/import.mjs',savedExport],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.equal(savedRun.status,0,savedRun.stderr);
-  const savedDb=new DatabaseSync(join(migration,'data/feed.sqlite'));assert.equal(savedDb.prepare("SELECT saved_at FROM reports WHERE run_id='saved-import'").get().saved_at,savedTime);savedDb.close();
+  const savedDb=new DatabaseSync(join(migration,'data/feed.sqlite'));assert.equal(savedDb.prepare("SELECT saved_at FROM reports WHERE run_id='saved-import'").get().saved_at,savedTime);assert.deepEqual(savedDb.prepare('SELECT box FROM report_ticks ORDER BY box').all().map(t=>t.box),[1,2]);savedDb.close();
   backup.reports[0].attachments[0].sha256='invalid';writeFileSync(fixture,JSON.stringify(backup));const invalid=spawnSync(process.execPath,['scripts/import.mjs',fixture],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.notEqual(invalid.status,0);
  }finally{rmSync(migration,{recursive:true,force:true})}
- console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, Saved separate from favourites, HTTP MCP, read tools off by default and loopback-only, comments only with one opened report, public door publish-only, restart persistence, upgrade with backup, migration replay and checksum rejection.');
+ console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, Saved separate from favourites, ticks stored apart from the report, HTTP MCP, read tools off by default and loopback-only, comments only with one opened report, public door publish-only, restart persistence, upgrade with backup, migration replay and checksum rejection.');
 }finally{if(child)await stop();rmSync(data,{recursive:true,force:true})}

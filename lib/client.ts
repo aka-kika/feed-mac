@@ -5,7 +5,7 @@ export async function api<T = Record<string, unknown>>(path: string, options?: R
   return data as T;
 }
 export function post(data: unknown): RequestInit { return { method: 'POST', body: JSON.stringify(data) }; }
-export const excerpt = (markdown: string) => markdown.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[#*`>_~]/g, '').replace(/\s+/g, ' ').trim();
+export const excerpt = (markdown: string) => markdown.replace(/^\s*(?:[-*_]\s*){3,}$/gm, '').replace(/^(\s*(?:[-*+]|\d+[.)])\s+)\[[ xX]\]\s/gm, '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[#*`>_~]/g, '').replace(/\s+/g, ' ').trim();
 export const dayLabel = (date: string) => {
   const d = new Date(date), today = new Date(), yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
   if (d.toDateString() === today.toDateString()) return 'Today';

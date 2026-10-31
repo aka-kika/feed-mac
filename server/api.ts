@@ -3,6 +3,7 @@ import { connectionInstructions } from '@/lib/connection-instructions';
 import { body, db, bucket, failure, hash, HttpError, json, ownedReport, owner, publish, publisher, reportUrl, sameOrigin } from '@/lib/server';
 import { publishShape, sourceSchema } from '@/lib/validation';
 import { KIND_SQL } from '@/lib/kinds';
+import { reportBoxes } from '@/lib/ticks';
 import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
@@ -46,8 +47,9 @@ async function handle(request: Request, context: Context) {
       if (url.searchParams.get('download') === 'markdown') return new Response(String(report.markdown), { headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': `attachment; filename="report.md"; filename*=UTF-8''${encodeURIComponent(String(report.title).replace(/[\x00-\x1f/\\]/g, '-').slice(0, 100) + '.md')}`, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
       const comments = await db().prepare('SELECT id, body, created_at FROM comments WHERE report_id = ? AND owner = ? ORDER BY created_at, id').bind(id, user).all();
       const attachments = await db().prepare('SELECT id, name, type, size FROM attachments WHERE report_id = ?').bind(id).all();
+      const ticks = await db().prepare('SELECT box FROM report_ticks WHERE report_id = ? ORDER BY box').bind(id).all<{ box: number }>();
       const { owner: _owner, payload_hash: _hash, ...safe } = report;
-      return json({ report: { ...safe, saved: report.saved_at ? 1 : 0, kind, attachments: attachments.results, comment_count: comments.results.length }, comments: comments.results });
+      return json({ report: { ...safe, saved: report.saved_at ? 1 : 0, kind, attachments: attachments.results, comment_count: comments.results.length, ticks: ticks.results.map(t => t.box) }, comments: comments.results });
     }
     if (route === 'reports' && id && method === 'PATCH') {
       await ownedReport(id, user);
@@ -60,6 +62,15 @@ async function handle(request: Request, context: Context) {
     if (route === 'routine-kinds' && method === 'POST') {
       const data = z.object({ source: z.string().min(1).max(80), routine: publishShape.routine, kind: z.enum(['news', 'report']) }).strict().parse(await body(request, 2000));
       await db().prepare('INSERT INTO routine_kinds (owner, source, routine, kind) VALUES (?, ?, ?, ?) ON CONFLICT(owner, source, routine) DO UPDATE SET kind = excluded.kind').bind(user, data.source, data.routine, data.kind).run();
+      return json({ saved: true });
+    }
+    // Ticks live beside the report, never in its text. Ticking twice keeps the first time.
+    if (route === 'ticks' && method === 'POST') {
+      const data = z.object({ report_id: z.string().uuid(), box: z.number().int().positive(), ticked: z.boolean() }).strict().parse(await body(request, 2000));
+      const report = await ownedReport(data.report_id, user);
+      if (!reportBoxes(String(report.markdown)).some(b => b.box === data.box && !b.written)) throw new HttpError(400, 'That box cannot be ticked.');
+      if (data.ticked) await db().prepare('INSERT INTO report_ticks (report_id, box, ticked_at) VALUES (?, ?, ?) ON CONFLICT(report_id, box) DO NOTHING').bind(data.report_id, data.box, new Date().toISOString()).run();
+      else await db().prepare('DELETE FROM report_ticks WHERE report_id = ? AND box = ?').bind(data.report_id, data.box).run();
       return json({ saved: true });
     }
     if (route === 'comments' && method === 'POST') {
