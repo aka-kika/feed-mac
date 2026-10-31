@@ -33,6 +33,15 @@ try{
  assert.equal((await req('/icons/feed-v2-32.png')).status,200);
  assert.equal((await req('/assets/app.js')).status,303);
  assert.equal((await req('/api/reports','GET',null,{'oai-authenticated-user-id':'owner','tailscale-user-login':'owner'})).status,401);
+ // A report link survives signing in. Only a link to a report is followed: no other page, and never another site.
+ const wanted=randomUUID(),wantedPath='/?report='+wanted,wantedNext=encodeURIComponent(wantedPath);
+ assert.equal((await req(wantedPath)).headers.get('location'),'/login?next='+wantedNext,'a signed-out report link keeps its target');assert.equal((await req('/')).headers.get('location'),'/login');assert.equal((await req('/?report=not-an-id')).headers.get('location'),'/login');
+ assert.ok((await(await req('/login?next='+wantedNext)).text()).includes(`action="/login?next=${wantedNext}"`),'the form carries it');
+ const evilPage=await(await req('/login?next='+encodeURIComponent('/?report="><script>alert(1)</script>'))).text();assert.ok(!evilPage.includes('<script>'),'no script from the link');assert.ok(evilPage.includes('action="/login"'));
+ const signIn=(next,pass=password)=>fetch(origin+'/login?next='+encodeURIComponent(next),{method:'POST',body:new URLSearchParams({password:pass}),redirect:'manual'});
+ assert.equal((await signIn(wantedPath)).headers.get('location'),wantedPath);
+ for(const bad of ['https://evil.test','//evil.test','/settings','/\\evil.test',wantedPath+'&x=1'])assert.equal((await signIn(bad)).headers.get('location'),'/','not followed: '+bad);
+ const wrong=await signIn(wantedPath,'wrong password');assert.equal(wrong.status,401);assert.ok((await wrong.text()).includes(`action="/login?next=${wantedNext}"`),'a wrong password keeps the link');
  // A sign-in body is read only up to its limit: an endless chunked one gets a 413 straight away, it is not held in memory until it ends. A normal chunked one still works.
  const chunkedLogin=body=>new Promise((ok,fail)=>{const timer=setTimeout(()=>{r.destroy();fail(Error('sign-in kept reading an endless body'))},3000);const r=request({host:'127.0.0.1',port,path:'/login',method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Transfer-Encoding':'chunked'}},res=>{res.resume();clearTimeout(timer);r.destroy();ok(res.statusCode)});r.on('error',()=>{});r.write(body);if(body.length<4096)r.end();});
  assert.equal(await chunkedLogin('x'.repeat(5000)),413,'an oversized chunked sign-in is refused');
