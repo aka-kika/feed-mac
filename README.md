@@ -8,7 +8,7 @@
 <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
 <img alt="SQLite" src="https://img.shields.io/badge/data-SQLite%20%2B%20files-555555">
 <img alt="MCP server" src="https://img.shields.io/badge/MCP-publish%20and%20read-6E56CF">
-<img alt="Version" src="https://img.shields.io/badge/release-1.5.0-blue">
+<img alt="Version" src="https://img.shields.io/badge/release-1.6.0-blue">
 <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
