@@ -24,6 +24,13 @@ try{
  assert.deepEqual(mergeNewest({reports:rows(1,2),cursor:'after-2'},{reports:rows(7,8),cursor:'after-8'}),{reports:rows(7,8),cursor:'after-8'},'too many new ones to connect: start over');
  assert.deepEqual(mergeNewest({reports:rows(1,2),cursor:null},{reports:[],cursor:null}),{reports:[],cursor:null});
  assert.deepEqual(mergeNewest({reports:rows(1,2),cursor:null},{reports:rows(1,2),cursor:null}),{reports:rows(1,2),cursor:null});
+ // A box's text comes out one level out, whatever it sat in. Top-level boxes are exactly as written.
+ const {reportBoxes,tickedText}=await load('lib/ticks.ts'),marked=text=>reportBoxes(text).map(b=>b.markdown);
+ assert.deepEqual(marked('- [ ] One\n\n**X**\n\n```\ncode\n```\n\n---\n\n- [ ] Two\n\nReply.\n'),['- [x] One\n\n**X**\n\n```\ncode\n```','- [x] Two\n\nReply.'],'top level, as written');
+ assert.deepEqual(marked('> - [ ] Quoted\n>   more of it\n>\n>   ```\n>   code\n>   ```\n'),['- [x] Quoted\n  more of it\n\n  ```\n  code\n  ```'],'a quoted box loses every > or none');
+ assert.deepEqual(marked('- [ ] Parent\n  - [ ] Child\n    its line\n\nAfter the list\n\n    an indented code block\n'),['- [x] Parent','- [x] Child\n  its line\n\nAfter the list\n\n    an indented code block'],'lines after the list stay as written');
+ assert.deepEqual(marked('1. - [ ] In a numbered item\n   its line\n'),['- [x] In a numbered item\nits line'],'a marker on the same line counts as indent');
+ assert.ok(tickedText({title:'T',published_at:'2026-11-01T08:00:00Z',markdown:'- [ ] One\n- [ ] Two\n'},[2]).endsWith('\n\n- [x] Two\n'),'Copy checked takes the ticked box');
  await start();
  assert.equal((await req('/')).status,303);assert.equal((await req('/api/reports')).status,401);
  assert.equal((await req('/login')).status,200);
@@ -125,8 +132,11 @@ try{
  for(const box of [3,6,0,-1,1.5,'1'])assert.equal((await tick(box)).status,400,'box '+box);
  assert.equal((await tick(1,true,owner,report.id)).status,400,'a report without boxes');assert.equal((await tick(1,true,owner,randomUUID())).status,404);
  assert.equal((await req('/api/ticks','POST',{report_id:tickReport,box:1,ticked:true,by:'x'},owner)).status,400);
+ // A tab drawn by an older parser can name the wrong box: the label it sends must match, or nothing is saved. A tab that sends no label is taken at its word.
+ assert.equal((await req('/api/ticks','POST',{report_id:tickReport,box:1,ticked:true,label:'Idea 2: second'},owner)).status,409,'the label belongs to another box');
  assert.deepEqual((await ticksOf()).ticks,[],'a refused tick saves nothing');
- assert.equal((await tick(4)).status,200);assert.equal((await tick(1)).status,200);assert.equal((await tick(1)).status,200);
+ assert.equal((await req('/api/ticks','POST',{report_id:tickReport,box:4,ticked:true,label:'Idea 3: parent'},owner)).status,200,'the right label');assert.equal((await tick(1)).status,200);assert.equal((await tick(1)).status,200);
+ const longBox='Long idea '+'word '.repeat(2000),longReport=(await(await req('/api/publish','POST',{run_id:'long-box',routine:'Long box',title:'Long box',markdown:'- [ ] '+longBox},pager)).json()).id;assert.equal((await req('/api/ticks','POST',{report_id:longReport,box:1,ticked:true,label:longBox.trim().slice(0,200)},owner)).status,200,'a long box can be ticked');
  assert.deepEqual((await ticksOf()).ticks,[1,4]);assert.equal((await ticksOf()).markdown,tickPayload.markdown,'the report text never changes');
  r=await req('/api/publish','POST',tickPayload,pager);assert.equal(r.status,200);assert.equal((await r.json()).id,tickReport,'a retry still finds the report');
  assert.equal((await tick(4,false)).status,200);assert.equal((await tick(4,false)).status,200);assert.deepEqual((await ticksOf()).ticks,[1]);

@@ -23197,6 +23197,12 @@ function remarkGfm(options) {
 // lib/ticks.ts
 var parser = unified().use(remarkParse).use(remarkGfm);
 var plain = (node2) => node2?.value ?? node2?.children?.map(plain).join("") ?? "";
+var boxLabel = (box) => box.text.slice(0, 200);
+var unprefix = (line, prefix) => {
+  let at = 0;
+  for (const c of prefix) if (line[at] === (c === ">" ? ">" : " ")) at++;
+  return line.slice(at);
+};
 function reportBoxes(markdown) {
   const stops = [], rules = [];
   const walk = (node2) => {
@@ -23213,7 +23219,15 @@ function reportBoxes(markdown) {
     let end = next ? lineStart(next.position.start.offset) : markdown.length;
     for (const rule of [...rules].reverse()) if (rule.position.start.offset > offset && rule.position.end.offset <= end && !markdown.slice(rule.position.end.offset, end).trim()) end = lineStart(rule.position.start.offset);
     let text5 = markdown.slice(offset, end).trimEnd();
-    if (column > 1) text5 = text5.replace(new RegExp(`\\n {1,${column - 1}}`, "g"), "\n");
+    if (column > 1) {
+      const prefix = markdown.slice(lineStart(offset), offset), inside = node2.position.end.offset - offset;
+      let at = 0;
+      text5 = text5.split("\n").map((line, i2) => {
+        const start = at;
+        at += line.length + 1;
+        return i2 && start <= inside ? unprefix(line, prefix) : line;
+      }).join("\n").trimEnd();
+    }
     boxes.push({ box: boxes.length + 1, offset, written: node2.checked, text: plain(node2.children?.[0]).trim(), markdown: text5.replace(/^((?:[-*+]|\d+[.)])[ \t]+)\[[ xX]\]/, "$1[x]") });
   });
   return boxes;
@@ -23483,9 +23497,11 @@ async function handle2(request, context) {
       return json({ saved: true });
     }
     if (route === "ticks" && method === "POST") {
-      const data = external_exports.object({ report_id: external_exports.string().uuid(), box: external_exports.number().int().positive(), ticked: external_exports.boolean() }).strict().parse(await body(request, 2e3));
+      const data = external_exports.object({ report_id: external_exports.string().uuid(), box: external_exports.number().int().positive(), ticked: external_exports.boolean(), label: external_exports.string().max(200).optional() }).strict().parse(await body(request, 2e3));
       const report = await ownedReport(data.report_id, user);
-      if (!reportBoxes(String(report.markdown)).some((b) => b.box === data.box && !b.written)) throw new HttpError(400, "That box cannot be ticked.");
+      const found = reportBoxes(String(report.markdown)).find((b) => b.box === data.box && !b.written);
+      if (!found) throw new HttpError(400, "That box cannot be ticked.");
+      if (data.label !== void 0 && data.label !== boxLabel(found)) throw new HttpError(409, "This page is out of date. Reload it and tick again.");
       if (data.ticked) await db().prepare("INSERT INTO report_ticks (report_id, box, ticked_at) VALUES (?, ?, ?) ON CONFLICT(report_id, box) DO NOTHING").bind(data.report_id, data.box, (/* @__PURE__ */ new Date()).toISOString()).run();
       else await db().prepare("DELETE FROM report_ticks WHERE report_id = ? AND box = ?").bind(data.report_id, data.box).run();
       return json({ saved: true });

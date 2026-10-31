@@ -8,7 +8,7 @@ import { Archive, ArchiveRestore, ArrowLeft, Bookmark, BookmarkMinus, Check, Cop
 import type { Kind } from '@/lib/kinds';
 import { type Report, type Comment, sourceName } from '@/lib/types';
 import { api, post, dayLabel } from '@/lib/client';
-import { reportBoxes, tickedText, type Box } from '@/lib/ticks';
+import { boxLabel, reportBoxes, tickedText, type Box } from '@/lib/ticks';
 
 // The tick state reaches each box by context, so a tick redraws the box and not the whole report.
 const Ticks = createContext<{ boxes: Box[]; ticks: number[]; toggle: (box: number) => void } | null>(null), ThisBox = createContext<Box | undefined>(undefined);
@@ -47,7 +47,8 @@ export default function Reader({ report, comments, setComments, onBack, onChange
     if (ticking.current.has(box)) return;
     const on = !ticks.includes(box), flip = (list: number[], add: boolean) => add ? [...list, box] : list.filter(b => b !== box);
     ticking.current.add(box); tickEdits.current++; setTicks(list => flip(list, on));
-    try { await api('/ticks', post({ report_id: report.id, box, ticked: on })); }
+    const drawn = boxes.find(b => b.box === box);
+    try { await api('/ticks', post({ report_id: report.id, box, ticked: on, ...(drawn ? { label: boxLabel(drawn) } : {}) })); }
     catch (e) { setTicks(list => flip(list, !on)); showError((e as Error).message); }
     finally { ticking.current.delete(box); }
   }

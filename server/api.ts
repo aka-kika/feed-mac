@@ -3,7 +3,7 @@ import { connectionInstructions } from '@/lib/connection-instructions';
 import { body, db, bucket, failure, hash, HttpError, json, ownedReport, owner, publish, publisher, reportUrl, sameOrigin } from '@/lib/server';
 import { publishShape, sourceSchema } from '@/lib/validation';
 import { KIND_SQL } from '@/lib/kinds';
-import { reportBoxes } from '@/lib/ticks';
+import { boxLabel, reportBoxes } from '@/lib/ticks';
 import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
@@ -66,9 +66,11 @@ async function handle(request: Request, context: Context) {
     }
     // Ticks live beside the report, never in its text. Ticking twice keeps the first time.
     if (route === 'ticks' && method === 'POST') {
-      const data = z.object({ report_id: z.string().uuid(), box: z.number().int().positive(), ticked: z.boolean() }).strict().parse(await body(request, 2000));
+      const data = z.object({ report_id: z.string().uuid(), box: z.number().int().positive(), ticked: z.boolean(), label: z.string().max(200).optional() }).strict().parse(await body(request, 2000));
       const report = await ownedReport(data.report_id, user);
-      if (!reportBoxes(String(report.markdown)).some(b => b.box === data.box && !b.written)) throw new HttpError(400, 'That box cannot be ticked.');
+      const found = reportBoxes(String(report.markdown)).find(b => b.box === data.box && !b.written);
+      if (!found) throw new HttpError(400, 'That box cannot be ticked.');
+      if (data.label !== undefined && data.label !== boxLabel(found)) throw new HttpError(409, 'This page is out of date. Reload it and tick again.');
       if (data.ticked) await db().prepare('INSERT INTO report_ticks (report_id, box, ticked_at) VALUES (?, ?, ?) ON CONFLICT(report_id, box) DO NOTHING').bind(data.report_id, data.box, new Date().toISOString()).run();
       else await db().prepare('DELETE FROM report_ticks WHERE report_id = ? AND box = ?').bind(data.report_id, data.box).run();
       return json({ saved: true });
