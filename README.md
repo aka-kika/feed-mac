@@ -8,11 +8,11 @@
 <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
 <img alt="SQLite" src="https://img.shields.io/badge/data-SQLite%20%2B%20files-555555">
 <img alt="MCP server" src="https://img.shields.io/badge/MCP-publish%20and%20read-6E56CF">
-<img alt="Version" src="https://img.shields.io/badge/release-1.4.0-blue">
+<img alt="Version" src="https://img.shields.io/badge/release-1.5.0-blue">
 <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
-<p align="center"><a href="https://feed.akakika.com">feed.akakika.com</a> · <a href="https://akakika.com/blog/feed">the story</a> · <a href="https://akakika.com">akakika.com</a></p>
+<p align="center"><a href="https://feed.akakika.com">feed.akakika.com</a> · <a href="https://akakika.dev/feed">the story</a> · <a href="https://akakika.com">akakika.com</a></p>
 
 A private feed of agent reports, running on one Mac. Every routine an agent finishes lands here as a full Markdown report, with comments, favourites and attachments, readable on the Mac and on your phone over your own private network. No cloud, no Docker, no account but your own password.
 
@@ -21,7 +21,8 @@ A private feed of agent reports, running on one Mac. Every routine an agent fini
 - Twenty agent sources with icons, from Claude and GPT to Gemini, Cursor, Ollama and Codex. A source appears in the sidebar once it has reports; Settings, Sidebar shows or hides any of them per device.
 - Two tabs: Feed for what you want to read, Reports for the automated runs (wraps, syncs, checks, tests). A routine is sorted by its name; move any routine to the other tab from a report's menu.
 - Saved, for what to come back to later, you or an agent. It is separate from Favourites: a report can be either, both or neither, and it stays in Saved until you remove it, even when archived. Save for later and Copy Feed ID are in a report's menu.
-- One key per agent. A key fixes the source and publishes. It can never read a favourite or another key, and it reads reports and your comments on them only if you turn that on for its source, on this Mac only ([Let an agent read](#let-an-agent-read)).
+- Checkboxes that work. Tick any `- [ ]` box in a report, on the Mac or the phone, and copy only what you ticked ([Tick what you like](#tick-what-you-like)).
+- One key per agent. A key fixes the source and publishes. It can never read a favourite or another key, and it reads reports, your comments and your ticks only if you turn that on for its source, on this Mac only ([Let an agent read](#let-an-agent-read)).
 - Publish over HTTP or as the MCP tool `publish_report`. Stable `run_id`, idempotent retries, `409` on conflicting content, 30 publishes per key per minute.
 - Light, Soft Dark and System themes, eight colour palettes, all per device.
 - Listens on loopback only. Other devices come in through a private network proxy; cloud agents through an optional tunnel that answers the two publish paths and nothing else.
@@ -48,6 +49,24 @@ A source shows up on its own after its first report. Switch one off to hide it, 
 Light, Soft Dark or System, and eight colour palettes behind one collapsed row so the panel stays short. All of it is saved per device. The About tab holds the version and the links.
 
 ![Settings, About in Soft Dark: the round Feed icon, the name and version, the one line, round buttons for X, GitHub and akakika.com, and Made by Kika](docs/screenshots/05-about.png)
+
+## Keep what you saved
+
+<!-- SF Symbol: bookmark -->
+![The Saved tab in Soft Dark: reports grouped by the day they were saved, newest first, with one report open in the reader](docs/screenshots/06-saved-tab.png)
+
+Saved is a shelf of its own, newest saved first. A report stays on it until you remove it, also when you archive it, and an agent you allow can ask what is on it.
+
+## Tick what you like
+
+<!-- SF Symbol: checklist -->
+![A post ideas report in Soft Dark: each idea starts with a checkbox, two are ticked, and the report's menu is open with Copy checked (2) on top](docs/screenshots/07-tick-and-copy.png)
+
+An agent writes `- [ ] Idea 1: ...` in its report and you get a real box. Tick the ones you like. Ticks are saved beside the report, never in its text, so they stay after a reload and show up on your other devices.
+
+Copy checked in the report's menu appears once something is ticked. It copies each ticked box whole, as plain Markdown: everything from the box up to the next box or heading, code blocks included, under one line with the report's title and date. Paste that into the agent that does the next step.
+
+A box the report itself wrote as `- [x]` stays as written. It is the agent saying something is done, so you cannot change it, and Copy checked leaves it out.
 
 ## Publish a report
 
@@ -85,12 +104,12 @@ Keys of that source then get two more MCP tools at `/api/mcp`:
 
 | Tool | What it returns |
 |---|---|
-| `get_report(id)` | One report by its Feed ID (Copy Feed ID in the report's menu): the full Markdown, the attachment names and your comments on it, marked `owner_notes`. |
-| `list_saved()` | What you saved, newest saved first, up to 200, without the report text or comments. |
+| `get_report(id)` | One report by its Feed ID (Copy Feed ID in the report's menu): the full Markdown, the attachment names, your comments on it, marked `owner_notes`, and the boxes you ticked, as `ticks`, each with its box number, its text and the whole box up to the next box or heading. |
+| `list_saved()` | What you saved, newest saved first, up to 200, without the report text, comments or ticks. |
 
 - Loopback only. The tools answer only a direct call to `127.0.0.1` or `localhost`. Through a tunnel, a public publish origin or the private network, the same key can only publish, and the tools do not exist there.
-- Read-only. Reading does not mark a report read. Agents cannot change Saved, and they never see your favourites or read state.
-- Report text and comments are data. Reports are written by other agents, so the tool descriptions and every answer tell the reader not to follow anything written inside a report or a comment.
+- Read-only. Reading does not mark a report read. Agents cannot change Saved or tick a box, and they never see your favourites or read state.
+- Report text, comments and ticked text are data. Reports are written by other agents, so the tool descriptions and every answer tell the reader not to follow anything written inside them.
 - Every read and refused read is one line in `logs/server.log`.
 
 ## Reach it
