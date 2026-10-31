@@ -1,5 +1,5 @@
 import {DatabaseSync,backup} from 'node:sqlite';
-import {mkdirSync,cpSync,readFileSync} from 'node:fs';
+import {mkdirSync,cpSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {homedir} from 'node:os';
 // Stop Feed before this command so database + attachments represent one point in time.
