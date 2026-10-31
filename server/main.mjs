@@ -4,7 +4,6 @@ import {resolve,extname,join} from 'node:path';
 import {createHmac,timingSafeEqual,scrypt as scryptCallback} from 'node:crypto';
 import {promisify} from 'node:util';
 import {Readable} from 'node:stream';
-import {text as readBody} from 'node:stream/consumers';
 import {auth,dataDir,door,readPort,readSources} from './storage.mjs';
 import {api,mcp} from './routes.mjs';
 const scrypt=promisify(scryptCallback);
@@ -29,6 +28,8 @@ function publicAsset(pathname){
  if(pathname.startsWith('/icons/'))return pathname;
  return null;
 }
+// Reads up to the limit and stops holding bytes there, whatever the request's length header says. Null means too large.
+const readLimited=(req,limit)=>new Promise((ok,fail)=>{let size=0;const parts=[];const data=c=>{size+=c.length;if(size>limit){req.off('data',data);req.pause();ok(null);return;}parts.push(c);};req.on('data',data);req.once('end',()=>ok(Buffer.concat(parts).toString()));req.once('error',fail);});
 let failures=0,blockedUntil=0;
 const sender=res=>(status,body,headers={})=>{res.writeHead(status,{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',...headers});res.end(body??undefined)};
 const pathTokenOf=(url,req)=>{const m=url.pathname.match(/^(\/api\/(?:mcp|publish))\/(feed_[a-f0-9]{64})$/);if(m){url.pathname=m[1];if(!req.headers.authorization)req.headers.authorization=`Bearer ${m[2]}`;}};
@@ -63,8 +64,8 @@ createServer(async(req,res)=>{
    if(req.method!=='POST')return send(405,'Method not allowed',{'Content-Type':'text/plain; charset=utf-8','Allow':'GET, HEAD, POST'});
    if(Date.now()<blockedUntil)return send(429,login('Try again shortly.'),{...html,'Retry-After':'30'});
    if(Number(req.headers['content-length']||0)>4096)return send(413,'Too large',html);
-   const raw=await readBody(req);
-   if(raw.length>4096)return send(413,'Too large',html);
+   const raw=await readLimited(req,4096);
+   if(raw===null){res.once('finish',()=>req.destroy());return send(413,'Too large',{...html,Connection:'close'});}
    const password=new URLSearchParams(raw).get('password')||'';
    const digest=(await scrypt(password,config.salt,64)).toString('hex');
    if(!equal(digest,config.passwordHash)){failures++;if(failures>=5)blockedUntil=Date.now()+30000;return send(401,login('Incorrect password. Try again.'),html);}

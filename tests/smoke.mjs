@@ -22,6 +22,10 @@ try{
  assert.equal((await req('/icons/feed-v2-32.png')).status,200);
  assert.equal((await req('/assets/app.js')).status,303);
  assert.equal((await req('/api/reports','GET',null,{'oai-authenticated-user-id':'owner','tailscale-user-login':'owner'})).status,401);
+ // A sign-in body is read only up to its limit: an endless chunked one gets a 413 straight away, it is not held in memory until it ends. A normal chunked one still works.
+ const chunkedLogin=body=>new Promise((ok,fail)=>{const timer=setTimeout(()=>{r.destroy();fail(Error('sign-in kept reading an endless body'))},3000);const r=request({host:'127.0.0.1',port,path:'/login',method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Transfer-Encoding':'chunked'}},res=>{res.resume();clearTimeout(timer);r.destroy();ok(res.statusCode)});r.on('error',()=>{});r.write(body);if(body.length<4096)r.end();});
+ assert.equal(await chunkedLogin('x'.repeat(5000)),413,'an oversized chunked sign-in is refused');
+ assert.equal(await chunkedLogin(new URLSearchParams({password}).toString()),303,'a normal chunked sign-in works');
  const login=await fetch(origin+'/login',{method:'POST',body:new URLSearchParams({password}),redirect:'manual'});assert.equal(login.status,303);
  const cookie=login.headers.get('set-cookie').split(';')[0],owner={Cookie:cookie};
  assert.equal((await req('/','GET',null,owner)).status,200);
