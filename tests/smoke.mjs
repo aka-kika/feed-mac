@@ -5,14 +5,25 @@ import {join} from 'node:path';
 import {randomBytes,scryptSync,randomUUID,createHash} from 'node:crypto';
 import {spawn,spawnSync} from 'node:child_process';
 import {request} from 'node:http';
+import {build} from 'esbuild';
 const data=mkdtempSync(join(tmpdir(),'feed-mac-test-'));const port=19000+Math.floor(Math.random()*10000),origin=`http://127.0.0.1:${port}`;
 const salt=randomBytes(16).toString('hex'),password='temporary-test-password';
 writeFileSync(join(data,'config.json'),JSON.stringify({origin,port,salt,passwordHash:scryptSync(password,salt,64).toString('hex'),sessionSecret:randomBytes(32).toString('hex'),publishOrigins:['https://publish.example.test']}),{mode:0o600});
 let child,logs='';
 async function start(){child=spawn(process.execPath,['server/main.mjs'],{env:{...process.env,FEED_DATA_DIR:data},stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);for(let i=0;i<100;i++){try{if((await fetch(origin+'/health')).ok)return}catch{}await new Promise(r=>setTimeout(r,50));}throw Error('Server failed to start: '+logs)}
 async function stop(){const c=child;await new Promise(r=>{c.once('exit',r);c.kill()});child=null}
+// Plain functions from the TypeScript source, bundled for this run so the test needs no type stripping.
+const load=async file=>{const out=join(data,`loaded-${randomUUID()}.mjs`);await build({entryPoints:[file],bundle:true,format:'esm',platform:'node',outfile:out,logLevel:'silent'});return import(out)};
 const req=async(path,method='GET',body,headers={})=>fetch(origin+path,{method,headers:{...(body?{'Content-Type':'application/json'}:{}),...headers},body:body?JSON.stringify(body):undefined,redirect:'manual'});
 try{
+ // A background refresh brings the newest page and keeps the pages loaded below it.
+ const {mergeNewest}=await load('lib/client.ts'),rows=(...ids)=>ids.map(id=>({id}));
+ assert.deepEqual(mergeNewest({reports:rows(1,2,3,4,5),cursor:'after-5'},{reports:rows(1,2,3),cursor:'after-3'}),{reports:rows(1,2,3,4,5),cursor:'after-5'},'older pages stay');
+ assert.deepEqual(mergeNewest({reports:rows(1,2,3,4,5),cursor:null},{reports:rows(0,1,2),cursor:'after-2'}),{reports:rows(0,1,2,3,4,5),cursor:null},'a new report on top, all were loaded');
+ assert.deepEqual(mergeNewest({reports:rows(1,2,3,4),cursor:'after-4'},{reports:rows(2,3),cursor:'after-3'}),{reports:rows(2,3,4),cursor:'after-4'},'a report that left the list goes');
+ assert.deepEqual(mergeNewest({reports:rows(1,2),cursor:'after-2'},{reports:rows(7,8),cursor:'after-8'}),{reports:rows(7,8),cursor:'after-8'},'too many new ones to connect: start over');
+ assert.deepEqual(mergeNewest({reports:rows(1,2),cursor:null},{reports:[],cursor:null}),{reports:[],cursor:null});
+ assert.deepEqual(mergeNewest({reports:rows(1,2),cursor:null},{reports:rows(1,2),cursor:null}),{reports:rows(1,2),cursor:null});
  await start();
  assert.equal((await req('/')).status,303);assert.equal((await req('/api/reports')).status,401);
  assert.equal((await req('/login')).status,200);

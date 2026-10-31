@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { List, MessageCircle, Archive, Bookmark, Circle, Star, MessageSquare, Search, Settings as SettingsIcon, Menu, X, RefreshCw, ArrowRight, Inbox, SlidersHorizontal, ClipboardCheck } from 'lucide-react';
-import { api, excerpt, dayLabel, post } from '@/lib/client';
+import { api, excerpt, dayLabel, mergeNewest, post } from '@/lib/client';
 import { SOURCES, sourceName, type Report, type Comment, type SourcePrefs, type Theme } from '@/lib/types';
 import Reader from './Reader';
 import AgentIcon from './AgentIcon';
@@ -29,7 +29,7 @@ export default function Feed() {
   const [sourcePrefs, setSourcePrefs] = useState<SourcePrefs>({});
   const [sidebar, setSidebar] = useState(false), [settings, setSettings] = useState(false), [search, setSearch] = useState(false), [searchDraft, setSearchDraft] = useState('');
   const cleanupRequest = useRef<Promise<unknown> | null>(null);
-  const selectionVersion = useRef(0), firstLoad = useRef(true), listVersion = useRef(0);
+  const selectionVersion = useRef(0), firstLoad = useRef(true), listVersion = useRef(0), moreInFlight = useRef(false);
   const selectedRef = useRef(selected); selectedRef.current = selected;
   const showError = useCallback((message: string) => setError(message), []);
 
@@ -62,17 +62,19 @@ export default function Feed() {
   }, [showError]);
 
   const loadList = useCallback(async (silent = false, cursor?: string) => {
+    // A background refresh waits its turn: it must not cancel the older page being loaded.
+    if (silent && moreInFlight.current) return;
     const version = ++listVersion.current;
     if (!silent && !cursor) setLoading(true);
-    if (cursor) setMoreLoading(true);
+    if (cursor) { setMoreLoading(true); moreInFlight.current = true; }
     try {
       const params = new URLSearchParams({ view, source, routine, q: query }); if (cursor) params.set('cursor', cursor);
       const result = await api<ListResult>(`/reports?${params}`);
       if (version !== listVersion.current) return;
-      setList(previous => cursor ? { ...result, reports: [...previous.reports, ...result.reports.filter(r => !previous.reports.some(p => p.id === r.id))] } : result);
+      setList(previous => cursor ? { ...result, reports: [...previous.reports, ...result.reports.filter(r => !previous.reports.some(p => p.id === r.id))] } : silent ? { ...result, ...mergeNewest(previous, result) } : result);
       if (firstLoad.current) { firstLoad.current = false; const id = new URLSearchParams(location.search).get('report'); if (id) void openReport(id, false); else if (matchMedia('(min-width: 760px)').matches && result.reports[0]) void openReport(result.reports[0].id, false); }
     } catch (e) { if (version === listVersion.current) showError((e as Error).message); }
-    finally { if (version === listVersion.current) { setLoading(false); setMoreLoading(false); } }
+    finally { if (cursor) moreInFlight.current = false; if (version === listVersion.current) { setLoading(false); setMoreLoading(false); } }
   }, [view, source, routine, query, openReport, showError]);
   useEffect(() => { cleanupRequest.current ??= api('/demo/cleanup', post({})); void cleanupRequest.current.then(() => loadList()).catch(e => { showError((e as Error).message); void loadList(); }); const onFocus = () => { if (document.visibilityState === 'visible') void loadList(true); }; const timer = setInterval(onFocus, 30000); document.addEventListener('visibilitychange', onFocus); return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onFocus); }; }, [loadList]);
   useEffect(() => { function onPop() { const id = new URLSearchParams(location.search).get('report'); if (id) void openReport(id, false); else { ++selectionVersion.current; setSelected(null); setReading(false); } } addEventListener('popstate', onPop); return () => removeEventListener('popstate', onPop); }, [openReport]);
