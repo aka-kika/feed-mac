@@ -32,6 +32,8 @@ try{
  assert.equal((await req('/favicon.ico')).status,200);
  assert.equal((await req('/icons/feed-v2-32.png')).status,200);
  assert.equal((await req('/assets/app.js')).status,303);
+ // The public icons folder is a fence: no way out of it to the app or the docs without a session.
+ for(const path of ['/icons/..%2fassets/app.js','/icons/..%2findex.html','/icons/..%2fdownloads/LOCAL-PUBLISHING.md','/icons/%2e%2e%2fassets/app.js'])assert.equal((await req(path)).status,303,path);
  assert.equal((await req('/api/reports','GET',null,{'oai-authenticated-user-id':'owner','tailscale-user-login':'owner'})).status,401);
  // A report link survives signing in. Only a link to a report is followed: no other page, and never another site.
  const wanted=randomUUID(),wantedPath='/?report='+wanted,wantedNext=encodeURIComponent(wantedPath);

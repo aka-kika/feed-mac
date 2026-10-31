@@ -46,9 +46,9 @@ async function callRoute(req,res,send,url,authenticated,doorName){
 }
 createServer(async(req,res)=>{
  const send=sender(res);
- const file=(pathname,method)=>{
+ const file=(pathname,method,within='')=>{
   const root=resolve('dist'),p=resolve(root,'.'+decodeURIComponent(pathname==='/'?'/index.html':pathname));
-  if(!p.startsWith(root+'/')||!existsSync(p)||!statSync(p).isFile())return false;
+  if(!p.startsWith(join(root,within)+'/')||!existsSync(p)||!statSync(p).isFile())return false;
   send(200,method==='HEAD'?undefined:readFileSync(p),{'Content-Type':types[extname(p)]||'application/octet-stream'});return true;
  };
  try{
@@ -83,7 +83,7 @@ createServer(async(req,res)=>{
    return await callRoute(req,res,send,url,authenticated,'outside');
   }
   const asset=publicAsset(url.pathname);
-  if(asset&&['GET','HEAD'].includes(req.method)&&file(asset,req.method))return;
+  if(asset&&['GET','HEAD'].includes(req.method)&&file(asset,req.method,asset.startsWith('/icons/')?'icons':''))return;
   if(!authenticated)return send(303,'',{...html,Location:loginPath(reportLink.test(url.pathname+url.search)?url.pathname+url.search:null)});
   if(!['GET','HEAD'].includes(req.method))return send(405,'Method not allowed',{'Content-Type':'text/plain; charset=utf-8'});
   if(!file(url.pathname,req.method))return send(404,'Not found',{'Content-Type':'text/plain; charset=utf-8'});
