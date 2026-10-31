@@ -84,16 +84,18 @@ export async function publish(key: Publisher, raw: PublishInput, sample = false)
     for (const file of files) statements.push(db().prepare('INSERT INTO attachments (id, report_id, name, type, size, object_key) VALUES (?, ?, ?, ?, ?, ?)').bind(file.id, id, file.name, file.type, file.bytes.length, `${id}/${file.id}`));
     if (!sample) statements.push(db().prepare('UPDATE agent_keys SET last_used_at = ? WHERE id = ?').bind(now, key.id));
     await db().batch(statements);
-    // Only news pings the phone; automated reports arrive quietly.
-    const quiet = !sample && (await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first<{ kind: string }>())?.kind === 'report';
-    if (!sample) { logPublish(key, data.run_id, `created id=${id}${quiet ? ' quiet' : ''}`); if (!quiet) notify({ title: `${key.source} · ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ''}/?report=${id}` }); }
-    return { id, duplicate: false };
   } catch (error) {
     for (const path of uploaded) { try { await bucket().delete(path); } catch { console.error('Attachment cleanup failed'); } }
     const concurrent = await db().prepare('SELECT id, payload_hash FROM reports WHERE owner = ? AND source = ? AND routine = ? AND run_id = ?').bind(key.owner, key.source, data.routine, data.run_id).first<{ id: string; payload_hash: string }>();
     if (concurrent) { if (concurrent.payload_hash !== payloadHash) throw new HttpError(409, 'This run ID already has different content.'); return { id: concurrent.id, duplicate: true }; }
     throw error;
   }
+  // Saved from here on. Nothing below may undo that: a failure only costs the sorting of the ping, never the report or its files.
+  let quiet = false;
+  // Only news pings the phone; automated reports arrive quietly.
+  if (!sample) try { quiet = (await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first<{ kind: string }>())?.kind === 'report'; } catch { console.error('Could not sort a saved report for its notification'); }
+  if (!sample) { logPublish(key, data.run_id, `created id=${id}${quiet ? ' quiet' : ''}`); if (!quiet) notify({ title: `${key.source} · ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ''}/?report=${id}` }); }
+  return { id, duplicate: false };
 }
 // Reports are read on the tailnet origin; a publish that came in over a public HTTPS origin (Funnel) gets that origin back, loopback stays loopback.
 export function reportUrl(request: Request, id: string) { const origin = new URL(request.url).origin; return `${origin.startsWith('https:') && publicOrigin ? publicOrigin : origin}/?report=${id}`; }

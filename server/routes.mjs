@@ -23361,12 +23361,6 @@ async function publish(key, raw, sample = false) {
     for (const file of files) statements.push(db().prepare("INSERT INTO attachments (id, report_id, name, type, size, object_key) VALUES (?, ?, ?, ?, ?, ?)").bind(file.id, id, file.name, file.type, file.bytes.length, `${id}/${file.id}`));
     if (!sample) statements.push(db().prepare("UPDATE agent_keys SET last_used_at = ? WHERE id = ?").bind(now, key.id));
     await db().batch(statements);
-    const quiet = !sample && (await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first())?.kind === "report";
-    if (!sample) {
-      logPublish(key, data.run_id, `created id=${id}${quiet ? " quiet" : ""}`);
-      if (!quiet) notify({ title: `${key.source} \xB7 ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ""}/?report=${id}` });
-    }
-    return { id, duplicate: false };
   } catch (error2) {
     for (const path2 of uploaded) {
       try {
@@ -23382,6 +23376,17 @@ async function publish(key, raw, sample = false) {
     }
     throw error2;
   }
+  let quiet = false;
+  if (!sample) try {
+    quiet = (await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first())?.kind === "report";
+  } catch {
+    console.error("Could not sort a saved report for its notification");
+  }
+  if (!sample) {
+    logPublish(key, data.run_id, `created id=${id}${quiet ? " quiet" : ""}`);
+    if (!quiet) notify({ title: `${key.source} \xB7 ${data.title}`, message: data.notify ?? data.routine, click: `${publicOrigin ?? ""}/?report=${id}` });
+  }
+  return { id, duplicate: false };
 }
 function reportUrl(request, id) {
   const origin = new URL(request.url).origin;

@@ -109,6 +109,12 @@ try{
  r=await req('/api/publish','POST',tickPayload,pager);assert.equal(r.status,200);assert.equal((await r.json()).id,tickReport,'a retry still finds the report');
  assert.equal((await tick(4,false)).status,200);assert.equal((await tick(4,false)).status,200);assert.deepEqual((await ticksOf()).ticks,[1]);
  assert.equal((await tick(5)).status,200);
+ // A report that is saved stays whole: a failure after the commit (sorting it for the ping) must not delete its attachments or call it a duplicate.
+ {const {DatabaseSync}=await import('node:sqlite'),side=new DatabaseSync(join(data,'feed.sqlite'));side.exec('ALTER TABLE routine_kinds RENAME TO routine_kinds_gone');
+  const late=await req('/api/publish','POST',{run_id:'late-failure',routine:'Late failure',title:'Late failure',markdown:'Saved, then a later step fails',attachments:[{name:'kept.md',type:'text/markdown',base64:Buffer.from('kept').toString('base64')}]},pager);
+  side.exec('ALTER TABLE routine_kinds_gone RENAME TO routine_kinds');
+  const row=side.prepare("SELECT a.object_key FROM attachments a JOIN reports r ON r.id=a.report_id WHERE r.run_id='late-failure'").get();side.close();
+  assert.ok(existsSync(join(data,'attachments',row.object_key)),'the attachment is still there');assert.equal(late.status,201,'and the publish is not called a duplicate');assert.match(logs,/run_id=late-failure outcome=created/);}
  await stop();await start();assert.deepEqual((await ticksOf()).ticks,[1,5],'ticks stay after a restart');detail=await(await req('/api/reports/'+report.id,'GET',null,owner)).json();assert.equal(detail.report.markdown,payload.markdown);assert.equal(detail.report.archived,1);assert.equal(detail.comments[0].body,comment.body);assert.equal((await list('saved')).reports[0].title,'Page 40');await stop();
  // An old database upgrades with nothing lost and a backup first; a second start changes nothing; a new database needs no backup.
  const oldData=mkdtempSync(join(tmpdir(),'feed-upgrade-test-'));
