@@ -147,6 +147,9 @@ try{
  r=await req('/api/publish','POST',tickPayload,pager);assert.equal(r.status,200);assert.equal((await r.json()).id,tickReport,'a retry still finds the report');
  assert.equal((await tick(4,false)).status,200);assert.equal((await tick(4,false)).status,200);assert.deepEqual((await ticksOf()).ticks,[1]);
  assert.equal((await tick(5)).status,200);
+ // The Reader's refresh asks for the ticks alone, not the whole report. Same rules as ticking: the owner's session only.
+ const onlyTicks=await req('/api/reports/'+tickReport+'/ticks','GET',null,owner);assert.equal(onlyTicks.status,200);assert.deepEqual(await onlyTicks.json(),{ticks:[1,5]});
+ assert.equal((await req('/api/reports/'+tickReport+'/ticks','GET',null,agent)).status,401);assert.equal((await req('/api/reports/'+tickReport+'/ticks')).status,401);assert.equal((await req('/api/reports/'+randomUUID()+'/ticks','GET',null,owner)).status,404);
  // A report that is saved stays whole: a failure after the commit (sorting it for the ping) must not delete its attachments or call it a duplicate.
  {const {DatabaseSync}=await import('node:sqlite'),side=new DatabaseSync(join(data,'feed.sqlite'));side.exec('ALTER TABLE routine_kinds RENAME TO routine_kinds_gone');
   const late=await req('/api/publish','POST',{run_id:'late-failure',routine:'Late failure',title:'Late failure',markdown:'Saved, then a later step fails',attachments:[{name:'kept.md',type:'text/markdown',base64:Buffer.from('kept').toString('base64')}]},pager);

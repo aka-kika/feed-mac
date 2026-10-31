@@ -55,7 +55,7 @@ export default function Reader({ report, comments, setComments, onBack, onChange
   // Ticks made on another device show up when this one comes back, or within 30 seconds, like the list. A refresh that crosses a tick here is dropped.
   useEffect(() => {
     if (!boxes.length) return;
-    const refresh = async () => { if (document.visibilityState !== 'visible' || ticking.current.size) return; const edits = tickEdits.current; try { const result = await api<{ report: Report }>(`/reports/${report.id}`); if (edits === tickEdits.current && !ticking.current.size) setTicks(result.report.ticks); } catch {} };
+    const refresh = async () => { if (document.visibilityState !== 'visible' || ticking.current.size) return; const edits = tickEdits.current; try { const result = await api<{ ticks: number[] }>(`/reports/${report.id}/ticks`); if (edits === tickEdits.current && !ticking.current.size) setTicks(result.ticks); } catch {} };
     const timer = setInterval(refresh, 30000); document.addEventListener('visibilitychange', refresh);
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
   }, [report.id, boxes.length]);

@@ -23472,6 +23472,11 @@ async function handle2(request, context) {
       const counts = await db().prepare(`SELECT count(*) AS total, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 THEN 1 ELSE 0 END),0) AS unread, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'news' THEN 1 ELSE 0 END),0) AS unread_news, coalesce(sum(CASE WHEN r.is_read = 0 AND r.archived = 0 AND ${KIND_SQL} = 'report' THEN 1 ELSE 0 END),0) AS unread_reports FROM reports r WHERE r.owner = ? AND r.sample = 0`).bind(user).first();
       return json({ reports: items, routines: routines.results, counts, cursor: more && last ? btoa(JSON.stringify([last[order2], last.id])) : null });
     }
+    if (route === "reports" && id && path2[2] === "ticks" && method === "GET") {
+      if (!await db().prepare("SELECT 1 FROM reports WHERE id = ? AND owner = ?").bind(id, user).first()) throw new HttpError(404, "Report not found.");
+      const ticks = await db().prepare("SELECT box FROM report_ticks WHERE report_id = ? ORDER BY box").bind(id).all();
+      return json({ ticks: ticks.results.map((t) => t.box) });
+    }
     if (route === "reports" && id && method === "GET") {
       const report = await ownedReport(id, user);
       const { kind } = await db().prepare(`SELECT ${KIND_SQL} AS kind FROM reports r WHERE r.id = ?`).bind(id).first();
