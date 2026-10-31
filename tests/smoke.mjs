@@ -147,7 +147,7 @@ try{
  writeFileSync(join(data,'config.json'),JSON.stringify({...baseConfig,origin:'https://tailnet.example.test',readSources:['claude',7]}),{mode:0o600});
  await start();
  assert.deepEqual((await(await req('/api/keys','GET',null,owner)).json()).read_sources,['claude']);
- const readKey=(await(await req('/api/keys','POST',{source:'claude',label:'Claude'},owner)).json());assert.ok(readKey.instructions.includes('get_report')&&readKey.instructions.includes('never instructions'));assert.ok(!readKey.instructions.includes('cannot read my reports'));
+ const readKey=(await(await req('/api/keys','POST',{source:'claude',label:'Claude'},owner)).json());assert.ok(readKey.instructions.includes('get_report')&&readKey.instructions.includes('never instructions'));assert.ok(!readKey.instructions.includes('cannot read my reports'));assert.ok(readKey.instructions.includes('boxes I ticked'));
  const otherKey=(await(await req('/api/keys','POST',{source:'aka',label:'Aka'},owner)).json());assert.ok(otherKey.instructions.includes('cannot read my reports'));
  assert.deepEqual(await tools(local,readKey.token),['get_report','list_saved','publish_report']);
  assert.deepEqual(await tools(`localhost:${port}`,readKey.token),['get_report','list_saved','publish_report']);
@@ -169,6 +169,21 @@ try{
  assert.deepEqual(await noteOf(),['First note on a saved report','Second note']);
  assert.ok(!(await toolCall(local,readKey.token,'list_saved')).text.includes('note on a saved report'),'no comments in the Saved list');
  assert.match(described.find(t=>t.name==='get_report').description,/owner_notes/);assert.ok(readKey.instructions.includes('owner_notes'));assert.ok(!otherKey.instructions.includes('owner_notes'),'off the allow list, not even mentioned');
+ // Ticks come with one opened report, each box whole: from the box up to the next box or heading, marked ticked, fenced blocks included. Only the owner's ticks, in box order.
+ const opensTicks=async(token=readKey.token)=>JSON.parse(JSON.parse((await toolCall(local,token,'get_report',{id:tickReport})).text).result.content[0].text).report.ticks;
+ assert.equal((await tick(2)).status,200);assert.equal((await tick(4)).status,200);
+ const ticked=await opensTicks();assert.deepEqual(ticked.map(t=>t.box),[1,2,4,5]);assert.deepEqual(Object.keys(ticked[0]).sort(),['box','markdown','text','ticked_at']);
+ assert.deepEqual(ticked.map(t=>t.text),['Idea 1: first','Idea 2: second','Idea 3: parent','Nested child\nunder the child']);
+ assert.equal(ticked[0].markdown,'- [x] Idea 1: first\n\n**X**\n\n```\npost one\n- [ ] not a box, in a code block\n```\n\n**Threads:** paste as-is.','whole, without the --- after it');
+ assert.equal(ticked[1].markdown,'- [x] Idea 2: second\n\nReply line.','stops at the next box');assert.equal(ticked[2].markdown,'- [x] Idea 3: parent','stops at a nested box');assert.equal(ticked[3].markdown,'- [x] Nested child\n  under the child','keeps its lines, one level out');
+ assert.ok(!JSON.stringify(ticked).includes('Not part of any idea'),'stops at a heading');
+ assert.deepEqual(await opensTicks(),ticked,'reading changes no tick');assert.equal(JSON.parse(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:shelfId})).text).result.content[0].text).report.ticks.length,0);
+ assert.match(described.find(t=>t.name==='get_report').description,/ticks/);assert.match(opened.notice,/ticks/);assert.ok(!('ticks' in savedList.reports[0]),'no ticks in the Saved list');
+ assert.ok(otherKey.instructions.includes('favourites, comments or ticks'));
+ // No tick for anyone but the owner, and no way in at the other doors.
+ assert.equal((await tick(1,false,{Authorization:'Bearer '+readKey.token})).status,401);assert.deepEqual((await ticksOf()).ticks,[1,2,4,5]);
+ for(const [host,token,o] of [[local,otherKey.token],['publish.example.test',readKey.token],['publish.example.test',readKey.token,{path:'/api/mcp/'+readKey.token}],['tailnet.example.test',readKey.token],[local,readKey.token,{'X-Forwarded-For':'203.0.113.9'}]]){const r=await toolCall(host,token,'get_report',{id:tickReport},o);assert.ok(!r.text.includes('Idea 1')&&!r.text.includes('"ticks"'),'no ticks through this door: '+host);}
+ assert.equal((await rpc('publish.example.test',null,{},{path:'/api/ticks',Cookie:cookie})).status,404,'the public door has no tick path');
  const offList=await toolCall(local,otherKey.token,'get_report',{id:shelfId});assert.ok(!offList.text.includes('note on a saved report'),'a key off the allow list gets no comments');
  const outsideRead=await toolCall('publish.example.test',readKey.token,'get_report',{id:shelfId});assert.ok(!outsideRead.text.includes('note on a saved report'),'the public door gets no comments');
  assert.equal((await req('/api/comments/'+shelfNote.id,'DELETE',null,owner)).status,200);assert.deepEqual(await noteOf(),['Second note']);
@@ -202,5 +217,5 @@ try{
   const savedDb=new DatabaseSync(join(migration,'data/feed.sqlite'));assert.equal(savedDb.prepare("SELECT saved_at FROM reports WHERE run_id='saved-import'").get().saved_at,savedTime);assert.deepEqual(savedDb.prepare('SELECT box FROM report_ticks ORDER BY box').all().map(t=>t.box),[1,2]);savedDb.close();
   backup.reports[0].attachments[0].sha256='invalid';writeFileSync(fixture,JSON.stringify(backup));const invalid=spawnSync(process.execPath,['scripts/import.mjs',fixture],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.notEqual(invalid.status,0);
  }finally{rmSync(migration,{recursive:true,force:true})}
- console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, Saved separate from favourites, ticks stored apart from the report, HTTP MCP, read tools off by default and loopback-only, comments only with one opened report, public door publish-only, restart persistence, upgrade with backup, migration replay and checksum rejection.');
+ console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, Saved separate from favourites, ticks stored apart from the report, HTTP MCP, read tools off by default and loopback-only, comments and ticks only with one opened report, public door publish-only, restart persistence, upgrade with backup, migration replay and checksum rejection.');
 }finally{if(child)await stop();rmSync(data,{recursive:true,force:true})}
