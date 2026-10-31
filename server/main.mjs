@@ -1,7 +1,7 @@
 import {createServer} from 'node:http';
 import {readFileSync,existsSync,statSync} from 'node:fs';
 import {resolve,extname,join} from 'node:path';
-import {createHmac,timingSafeEqual,scrypt as scryptCallback} from 'node:crypto';
+import {createHash,createHmac,timingSafeEqual,scrypt as scryptCallback} from 'node:crypto';
 import {promisify} from 'node:util';
 import {Readable} from 'node:stream';
 import {auth,dataDir,door,readPort,readSources} from './storage.mjs';
@@ -34,6 +34,9 @@ function publicAsset(pathname){
 }
 // Reads up to the limit and stops holding bytes there, whatever the request's length header says. Null means too large.
 const readLimited=(req,limit)=>new Promise((ok,fail)=>{let size=0;const parts=[];const data=c=>{size+=c.length;if(size>limit){req.off('data',data);req.pause();ok(null);return;}parts.push(c);};req.on('data',data);req.once('end',()=>ok(Buffer.concat(parts).toString()));req.once('error',fail);});
+// Static files are read once; a release restarts Feed. The browser keeps them and asks each time, so an unchanged file costs one small request.
+const staticFiles=new Map();
+const staticFile=p=>{let f=staticFiles.get(p);if(!f){const bytes=readFileSync(p);f={bytes,etag:`"${createHash('sha256').update(bytes).digest('hex').slice(0,32)}"`};staticFiles.set(p,f);}return f;};
 let failures=0,blockedUntil=0;
 const sender=res=>(status,body,headers={})=>{res.writeHead(status,{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',...headers});res.end(body??undefined)};
 const pathTokenOf=(url,req)=>{const m=url.pathname.match(/^(\/api\/(?:mcp|publish))\/(feed_[a-f0-9]{64})$/);if(m){url.pathname=m[1];if(!req.headers.authorization)req.headers.authorization=`Bearer ${m[2]}`;}};
@@ -48,8 +51,9 @@ createServer(async(req,res)=>{
  const send=sender(res);
  const file=(pathname,method,within='')=>{
   const root=resolve('dist'),p=resolve(root,'.'+decodeURIComponent(pathname==='/'?'/index.html':pathname));
-  if(!p.startsWith(join(root,within)+'/')||!existsSync(p)||!statSync(p).isFile())return false;
-  send(200,method==='HEAD'?undefined:readFileSync(p),{'Content-Type':types[extname(p)]||'application/octet-stream'});return true;
+  if(!p.startsWith(join(root,within)+'/')||(!staticFiles.has(p)&&(!existsSync(p)||!statSync(p).isFile())))return false;
+  const {bytes,etag}=staticFile(p),headers={'Content-Type':types[extname(p)]||'application/octet-stream','Cache-Control':'private, no-cache',ETag:etag};
+  if(req.headers['if-none-match']===etag)send(304,undefined,headers);else send(200,method==='HEAD'?undefined:bytes,headers);return true;
  };
  try{
   if(!allowed.has(req.headers.host))return send(403,'Unknown host',html);

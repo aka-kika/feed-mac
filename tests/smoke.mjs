@@ -58,7 +58,13 @@ try{
  const login=await fetch(origin+'/login',{method:'POST',body:new URLSearchParams({password}),redirect:'manual'});assert.equal(login.status,303);
  const cookie=login.headers.get('set-cookie').split(';')[0],owner={Cookie:cookie};
  assert.equal((await req('/','GET',null,owner)).status,200);
- assert.equal((await req('/assets/app.js','GET',null,owner)).status,200);
+ const bundle=await req('/assets/app.js','GET',null,owner);assert.equal(bundle.status,200);
+ // Static files are kept by the browser and checked each time, so a reload costs one small request. Still behind the session, and the API is never kept.
+ const tag=bundle.headers.get('etag');assert.ok(tag,'has an ETag');assert.equal(bundle.headers.get('cache-control'),'private, no-cache');
+ const unchanged=await req('/assets/app.js','GET',null,{...owner,'If-None-Match':tag});assert.equal(unchanged.status,304);assert.equal((await unchanged.text()).length,0);assert.equal(unchanged.headers.get('etag'),tag);
+ assert.equal((await req('/assets/app.js','GET',null,{...owner,'If-None-Match':'"other"'})).status,200);assert.equal((await req('/assets/app.js','GET',null,{'If-None-Match':tag})).status,303,'no session, no file');
+ const icon=await req('/icons/feed-v2-32.png');assert.equal((await req('/icons/feed-v2-32.png','GET',null,{'If-None-Match':icon.headers.get('etag')})).status,304);
+ assert.equal((await req('/api/reports','GET',null,owner)).headers.get('cache-control'),'private, no-store');assert.equal((await req('/login')).headers.get('cache-control'),'no-store');
  assert.equal((await req('/icons/feed-v2-180.png','GET',null,owner)).status,200);
  assert.equal((await req('/api/keys','POST',{source:'aka',label:'Aka'}, {...owner,Origin:'https://evil.test'})).status,403);
  const keyResponse=await req('/api/keys','POST',{source:'aka',label:'Aka'},owner);assert.equal(keyResponse.status,201);const key=await keyResponse.json();assert.ok(!key.instructions.includes('OAI-Sites-Authorization'));assert.ok(key.instructions.includes('https://publish.example.test/api/mcp/'+key.token),'path-token form');assert.ok(key.instructions.includes('30 publishes per key per minute'),'rate limit');
