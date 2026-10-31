@@ -29,3 +29,10 @@ export function reportBoxes(markdown: string): Box[] {
   });
   return boxes;
 }
+
+/** What Copy checked puts on the clipboard: one line naming the report, then each ticked box whole. */
+export function tickedText(report: { title: string; published_at: string; markdown: string }, ticks: number[]) {
+  const date = new Date(report.published_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const picked = reportBoxes(report.markdown).filter(b => !b.written && ticks.includes(b.box)).map(b => b.markdown);
+  return `Ticked in Feed: ${report.title} (${date})\n\n${picked.join('\n\n')}\n`;
+}
