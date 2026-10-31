@@ -26,7 +26,8 @@ Node.js 24 or newer. The smoke test never touches a real data folder.
   already connected, so changes to `lib/validation.ts`, `lib/server.ts` or
   `server/mcp.ts` need a smoke-test assertion and a clear reason.
 - Feed listens on loopback and keys publish. Reading is off unless the owner
-  lists a source in `readSources`, and it answers only a direct loopback call.
+  lists a source in `readSources`, and it answers only on the read door, a
+  second loopback listener that no tunnel or proxy forwards to.
   Changes that open the reader to the network, let a key read from anywhere
   else, or let a key change Saved or tick a box will not be merged. A key that
   can read also gets the owner's comments and ticks, as `owner_notes` and

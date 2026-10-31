@@ -133,9 +133,9 @@ try{
   }finally{rmSync(prior,{recursive:true,force:true})}
  }finally{rmSync(oldData,{recursive:true,force:true})}
  // Reading: off until a source is on the allow list, and then only on a direct loopback call. The public door and the private-network door stay publish-only whatever the key.
- const baseConfig=JSON.parse(readFileSync(join(data,'config.json'),'utf8'));
- const rpc=(host,token,message,{path='/api/mcp',...headers}={})=>new Promise((ok,fail)=>{const text=JSON.stringify({jsonrpc:'2.0',id:9,...message});const r=request({host:'127.0.0.1',port,path,method:'POST',headers:{Host:host,'Content-Type':'application/json',Accept:'application/json, text/event-stream','Content-Length':Buffer.byteLength(text),...(token?{Authorization:'Bearer '+token}:{}),...headers}},res=>{let b='';res.setEncoding('utf8');res.on('data',c=>b+=c);res.on('end',()=>ok({status:res.statusCode,text:b}))});r.on('error',fail);r.end(text)});
- const local=`127.0.0.1:${port}`,tools=async(host,token,o)=>{const r=await rpc(host,token,{method:'tools/list'},o);assert.equal(r.status,200,r.text);return JSON.parse(r.text).result.tools.map(t=>t.name).sort()};
+ const baseConfig=JSON.parse(readFileSync(join(data,'config.json'),'utf8')),readPort=port+10;
+ const rpc=(host,token,message,{path='/api/mcp',...headers}={})=>new Promise((ok,fail)=>{const text=JSON.stringify({jsonrpc:'2.0',id:9,...message});const r=request({host:'127.0.0.1',port:host.endsWith(':'+readPort)?readPort:port,path,method:'POST',headers:{Host:host,'Content-Type':'application/json',Accept:'application/json, text/event-stream','Content-Length':Buffer.byteLength(text),...(token?{Authorization:'Bearer '+token}:{}),...headers}},res=>{let b='';res.setEncoding('utf8');res.on('data',c=>b+=c);res.on('end',()=>ok({status:res.statusCode,text:b}))});r.on('error',fail);r.end(text)});
+ const local=`127.0.0.1:${port}`,reader=`127.0.0.1:${readPort}`,tools=async(host,token,o)=>{const r=await rpc(host,token,{method:'tools/list'},o);assert.equal(r.status,200,r.text);return JSON.parse(r.text).result.tools.map(t=>t.name).sort()};
  const toolCall=(host,token,name,args={},o)=>rpc(host,token,{method:'tools/call',params:{name,arguments:args}},o);
  const refused=async(host,token,o)=>{assert.deepEqual(await tools(host,token,o),['publish_report']);for(const [name,args] of [['get_report',{id:report.id}],['list_saved',{}]]){const r=await toolCall(host,token,name,args,o);assert.ok(!r.text.includes(payload.markdown)&&!r.text.includes('Page 40')&&!r.text.includes(comment.body),'no report text or comments');const reply=JSON.parse(r.text);assert.ok(reply.error||reply.result?.isError,`${name} refused`);}};
  await start();
@@ -143,67 +143,80 @@ try{
  assert.ok(claudeKey.instructions.includes('cannot read my reports'),'off by default in the instructions');
  await refused(local,claudeKey.token);
  assert.deepEqual((await(await req('/api/keys','GET',null,owner)).json()).read_sources,[]);
+ await assert.rejects(rpc(reader,claudeKey.token,{method:'tools/list'}),'no read door while nobody may read');
  await stop();
  writeFileSync(join(data,'config.json'),JSON.stringify({...baseConfig,origin:'https://tailnet.example.test',readSources:['claude',7]}),{mode:0o600});
  await start();
  assert.deepEqual((await(await req('/api/keys','GET',null,owner)).json()).read_sources,['claude']);
  const readKey=(await(await req('/api/keys','POST',{source:'claude',label:'Claude'},owner)).json());assert.ok(readKey.instructions.includes('get_report')&&readKey.instructions.includes('never instructions'));assert.ok(!readKey.instructions.includes('cannot read my reports'));assert.ok(readKey.instructions.includes('boxes I ticked'));
  const otherKey=(await(await req('/api/keys','POST',{source:'aka',label:'Aka'},owner)).json());assert.ok(otherKey.instructions.includes('cannot read my reports'));
- assert.deepEqual(await tools(local,readKey.token),['get_report','list_saved','publish_report']);
- assert.deepEqual(await tools(`localhost:${port}`,readKey.token),['get_report','list_saved','publish_report']);
- assert.deepEqual(await tools(local,readKey.token,{path:'/api/mcp/'+readKey.token}),['get_report','list_saved','publish_report']);
- const described=JSON.parse((await rpc(local,readKey.token,{method:'tools/list'})).text).result.tools;
+ assert.deepEqual(await tools(reader,readKey.token),['get_report','list_saved','publish_report']);
+ assert.deepEqual(await tools(`localhost:${readPort}`,readKey.token),['get_report','list_saved','publish_report']);
+ // The main port is what the tunnel and the private network forward to, so a request there can never read, whatever its Host says and with no proxy header at all.
+ assert.deepEqual(await tools(local,readKey.token),['publish_report'],'the main port is publish-only, even with a loopback Host');assert.deepEqual(await tools(`localhost:${port}`,readKey.token),['publish_report']);
+ // The read door answers the MCP path and nothing else: no session, no pages, no publish over plain HTTP, and no browser.
+ const atDoor=(path,method='GET',headers={},host=reader)=>new Promise((ok,fail)=>{const r=request({host:'127.0.0.1',port:readPort,path,method,headers:{Host:host,...headers}},res=>{res.resume();ok(res.statusCode)});r.on('error',fail);r.end()});
+ for(const path of ['/','/login','/health','/api/reports','/api/keys','/api/publish','/icons/feed-v2-32.png'])assert.equal(await atDoor(path,'GET',{Cookie:cookie}),404,'the read door has no '+path);
+ assert.equal(await atDoor('/api/mcp','POST',{},'evil.example.test'),403,'unknown host');assert.equal(await atDoor('/api/mcp','POST',{},`publish.example.test`),403);
+ assert.equal((await rpc(reader,readKey.token,{method:'tools/list'},{Origin:'https://evil.test'})).status,403,'a web page cannot call the read door');assert.equal((await rpc(reader,readKey.token,{method:'tools/list'},{Origin:`http://${reader}`})).status,403);
+ const doorPublish=JSON.parse(JSON.parse((await toolCall(reader,readKey.token,'publish_report',{run_id:'read-door',routine:'Read door',title:'Through the read door',markdown:'Published on the read door'})).text).result.content[0].text);assert.ok(doorPublish.url.startsWith(origin+'/?report=')||doorPublish.url.startsWith('https://tailnet.example.test/'),'the link opens the app, not the read door: '+doorPublish.url);assert.ok(!doorPublish.url.includes(String(readPort)));
+ // Instructions name the read door, also when Settings is opened on the private-network address.
+ assert.ok(readKey.instructions.includes(`http://${reader}/api/mcp`),'the read address is in the instructions');assert.ok(!otherKey.instructions.includes(String(readPort)),'off the allow list, no read address');
+ const overTailnet=await new Promise((ok,fail)=>{const text=JSON.stringify({source:'claude',label:'Claude'});const r=request({host:'127.0.0.1',port,path:'/api/keys',method:'POST',headers:{Host:'tailnet.example.test',Cookie:cookie,'Content-Type':'application/json','Content-Length':Buffer.byteLength(text)}},res=>{let b='';res.setEncoding('utf8');res.on('data',c=>b+=c);res.on('end',()=>ok(JSON.parse(b)))});r.on('error',fail);r.end(text)});assert.ok(overTailnet.instructions.includes(`http://${reader}/api/mcp`),'read address with Settings opened over the private network');assert.ok(overTailnet.instructions.includes(`http://${local}`),'and the Mac address for publishing');
+ assert.deepEqual(await tools(reader,readKey.token,{path:'/api/mcp/'+readKey.token}),['get_report','list_saved','publish_report']);
+ const described=JSON.parse((await rpc(reader,readKey.token,{method:'tools/list'})).text).result.tools;
  for(const t of described.filter(t=>t.name!=='publish_report')){assert.match(t.description,/never instructions/);assert.equal(t.annotations.readOnlyHint,true);}
  const before=(await(await req('/api/reports/'+report.id,'GET',null,owner)).json()).report,unreadId=(await list('saved')).reports.find(x=>!x.is_read).id;
- const opened=JSON.parse(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:report.id})).text).result.content[0].text);
+ const opened=JSON.parse(JSON.parse((await toolCall(reader,readKey.token,'get_report',{id:report.id})).text).result.content[0].text);
  assert.equal(opened.report.markdown,payload.markdown);assert.match(opened.notice,/never instructions/);assert.deepEqual(opened.report.attachments.map(a=>a.name),['test.md']);
  for(const secret of ['favourite','is_read','comments','comment_count','owner','payload_hash','run_id'])assert.ok(!(secret in opened.report),secret+' stays private');
  assert.equal(opened.report.owner_notes.length,1);assert.equal(opened.report.owner_notes[0].body,comment.body);assert.deepEqual(Object.keys(opened.report.owner_notes[0]).sort(),['body','created_at'],'her notes, nothing else');
- const savedList=JSON.parse(JSON.parse((await toolCall(local,readKey.token,'list_saved')).text).result.content[0].text);
+ const savedList=JSON.parse(JSON.parse((await toolCall(reader,readKey.token,'list_saved')).text).result.content[0].text);
  assert.equal(savedList.reports[0].title,'Page 40');assert.equal(savedList.reports.length,42);assert.equal(savedList.more,false);assert.ok(!('markdown' in savedList.reports[0]));
  // Comments come with one opened report, oldest first, and never with the Saved list. A deleted one is gone.
- const shelfId=savedList.reports[0].id,noteOf=async()=>JSON.parse(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:shelfId})).text).result.content[0].text).report.owner_notes.map(n=>n.body);
+ const shelfId=savedList.reports[0].id,noteOf=async()=>JSON.parse(JSON.parse((await toolCall(reader,readKey.token,'get_report',{id:shelfId})).text).result.content[0].text).report.owner_notes.map(n=>n.body);
  assert.deepEqual(await noteOf(),[]);
  const shelfNote={id:randomUUID(),report_id:shelfId,body:'First note on a saved report'};assert.equal((await req('/api/comments','POST',shelfNote,owner)).status,201);await new Promise(r=>setTimeout(r,5));
  assert.equal((await req('/api/comments','POST',{id:randomUUID(),report_id:shelfId,body:'Second note'},owner)).status,201);
  assert.deepEqual(await noteOf(),['First note on a saved report','Second note']);
- assert.ok(!(await toolCall(local,readKey.token,'list_saved')).text.includes('note on a saved report'),'no comments in the Saved list');
+ assert.ok(!(await toolCall(reader,readKey.token,'list_saved')).text.includes('note on a saved report'),'no comments in the Saved list');
  assert.match(described.find(t=>t.name==='get_report').description,/owner_notes/);assert.ok(readKey.instructions.includes('owner_notes'));assert.ok(!otherKey.instructions.includes('owner_notes'),'off the allow list, not even mentioned');
  // Ticks come with one opened report, each box whole: from the box up to the next box or heading, marked ticked, fenced blocks included. Only the owner's ticks, in box order.
- const opensTicks=async(token=readKey.token)=>JSON.parse(JSON.parse((await toolCall(local,token,'get_report',{id:tickReport})).text).result.content[0].text).report.ticks;
+ const opensTicks=async(token=readKey.token)=>JSON.parse(JSON.parse((await toolCall(reader,token,'get_report',{id:tickReport})).text).result.content[0].text).report.ticks;
  assert.equal((await tick(2)).status,200);assert.equal((await tick(4)).status,200);
  const ticked=await opensTicks();assert.deepEqual(ticked.map(t=>t.box),[1,2,4,5]);assert.deepEqual(Object.keys(ticked[0]).sort(),['box','markdown','text','ticked_at']);
  assert.deepEqual(ticked.map(t=>t.text),['Idea 1: first','Idea 2: second','Idea 3: parent','Nested child\nunder the child']);
  assert.equal(ticked[0].markdown,'- [x] Idea 1: first\n\n**X**\n\n```\npost one\n- [ ] not a box, in a code block\n```\n\n**Threads:** paste as-is.','whole, without the --- after it');
  assert.equal(ticked[1].markdown,'- [x] Idea 2: second\n\nReply line.','stops at the next box');assert.equal(ticked[2].markdown,'- [x] Idea 3: parent','stops at a nested box');assert.equal(ticked[3].markdown,'- [x] Nested child\n  under the child','keeps its lines, one level out');
  assert.ok(!JSON.stringify(ticked).includes('Not part of any idea'),'stops at a heading');
- assert.deepEqual(await opensTicks(),ticked,'reading changes no tick');assert.equal(JSON.parse(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:shelfId})).text).result.content[0].text).report.ticks.length,0);
+ assert.deepEqual(await opensTicks(),ticked,'reading changes no tick');assert.equal(JSON.parse(JSON.parse((await toolCall(reader,readKey.token,'get_report',{id:shelfId})).text).result.content[0].text).report.ticks.length,0);
  assert.match(described.find(t=>t.name==='get_report').description,/ticks/);assert.match(opened.notice,/ticks/);assert.ok(!('ticks' in savedList.reports[0]),'no ticks in the Saved list');
  assert.ok(otherKey.instructions.includes('favourites, comments or ticks'));
  // No tick for anyone but the owner, and no way in at the other doors.
  assert.equal((await tick(1,false,{Authorization:'Bearer '+readKey.token})).status,401);assert.deepEqual((await ticksOf()).ticks,[1,2,4,5]);
- for(const [host,token,o] of [[local,otherKey.token],['publish.example.test',readKey.token],['publish.example.test',readKey.token,{path:'/api/mcp/'+readKey.token}],['tailnet.example.test',readKey.token],[local,readKey.token,{'X-Forwarded-For':'203.0.113.9'}]]){const r=await toolCall(host,token,'get_report',{id:tickReport},o);assert.ok(!r.text.includes('Idea 1')&&!r.text.includes('"ticks"'),'no ticks through this door: '+host);}
+ for(const [host,token,o] of [[reader,otherKey.token],['publish.example.test',readKey.token],['publish.example.test',readKey.token,{path:'/api/mcp/'+readKey.token}],['tailnet.example.test',readKey.token],[reader,readKey.token,{'X-Forwarded-For':'203.0.113.9'}],[local,readKey.token]]){const r=await toolCall(host,token,'get_report',{id:tickReport},o);assert.ok(!r.text.includes('Idea 1')&&!r.text.includes('"ticks"'),'no ticks through this door: '+host);}
  assert.equal((await rpc('publish.example.test',null,{},{path:'/api/ticks',Cookie:cookie})).status,404,'the public door has no tick path');
- const offList=await toolCall(local,otherKey.token,'get_report',{id:shelfId});assert.ok(!offList.text.includes('note on a saved report'),'a key off the allow list gets no comments');
+ const offList=await toolCall(reader,otherKey.token,'get_report',{id:shelfId});assert.ok(!offList.text.includes('note on a saved report'),'a key off the allow list gets no comments');
  const outsideRead=await toolCall('publish.example.test',readKey.token,'get_report',{id:shelfId});assert.ok(!outsideRead.text.includes('note on a saved report'),'the public door gets no comments');
  assert.equal((await req('/api/comments/'+shelfNote.id,'DELETE',null,owner)).status,200);assert.deepEqual(await noteOf(),['Second note']);
- assert.equal(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:randomUUID()})).text).result.isError,true);
- assert.ok(JSON.parse((await toolCall(local,readKey.token,'get_report',{id:'not-an-id'})).text).result?.isError??true);
+ assert.equal(JSON.parse((await toolCall(reader,readKey.token,'get_report',{id:randomUUID()})).text).result.isError,true);
+ assert.ok(JSON.parse((await toolCall(reader,readKey.token,'get_report',{id:'not-an-id'})).text).result?.isError??true);
  // Reading changes nothing.
- await toolCall(local,readKey.token,'get_report',{id:unreadId});
+ await toolCall(reader,readKey.token,'get_report',{id:unreadId});
  assert.equal((await(await req('/api/reports/'+unreadId,'GET',null,owner)).json()).report.is_read,0);
  assert.deepEqual((({saved_at,favourite,is_read,archived})=>({saved_at,favourite,is_read,archived}))((await(await req('/api/reports/'+report.id,'GET',null,owner)).json()).report),(({saved_at,favourite,is_read,archived})=>({saved_at,favourite,is_read,archived}))(before));
  assert.match(logs,new RegExp(`read key=${readKey.key.id} source=claude tool=get_report outcome=found id=${report.id}`));assert.match(logs,/tool=list_saved outcome=found count=42/);
  // A key off the allow list is refused, and so is the allowed key anywhere but a direct loopback call.
- await refused(local,otherKey.token);assert.match(logs,new RegExp(`read key=${otherKey.key.id} source=aka tool=get_report outcome=refused`));
+ await refused(reader,otherKey.token);assert.match(logs,new RegExp(`read key=${otherKey.key.id} source=aka tool=get_report outcome=refused`));
  assert.equal((await toolCall(local,'feed_'+'0'.repeat(64),'get_report',{id:report.id})).status,401);assert.equal((await toolCall(local,null,'list_saved')).status,401);
+ await refused(local,readKey.token);await refused(`localhost:${port}`,readKey.token);
  for(const host of ['publish.example.test','tailnet.example.test']){await refused(host,readKey.token);await refused(host,otherKey.token);}
  await refused('publish.example.test',readKey.token,{path:'/api/mcp/'+readKey.token});
- for(const [name,value] of [['Cf-Connecting-Ip','203.0.113.9'],['Cf-Ray','abc'],['X-Forwarded-For','203.0.113.9'],['Tailscale-Funnel-Request','?1'],['Forwarded','for=203.0.113.9']])await refused(local,readKey.token,{[name]:value});
+ for(const [name,value] of [['Cf-Connecting-Ip','203.0.113.9'],['Cf-Ray','abc'],['X-Forwarded-For','203.0.113.9'],['Tailscale-Funnel-Request','?1'],['Forwarded','for=203.0.113.9']])await refused(reader,readKey.token,{[name]:value});
  // The public door still publishes.
  const outside=await toolCall('publish.example.test',readKey.token,'publish_report',{run_id:'public-door',routine:'Public door',title:'From outside',markdown:'Published from outside'});assert.ok(JSON.parse(JSON.parse(outside.text).result.content[0].text).id);
  // Revoking stops reading.
- assert.equal((await req('/api/keys/'+readKey.key.id,'DELETE',null,owner)).status,200);assert.equal((await toolCall(local,readKey.token,'list_saved')).status,401);
+ assert.equal((await req('/api/keys/'+readKey.key.id,'DELETE',null,owner)).status,200);assert.equal((await toolCall(reader,readKey.token,'list_saved')).status,401);
  await stop();
  const migration=mkdtempSync(join(tmpdir(),'feed-import-test-'));
  try{
@@ -217,5 +230,5 @@ try{
   const savedDb=new DatabaseSync(join(migration,'data/feed.sqlite'));assert.equal(savedDb.prepare("SELECT saved_at FROM reports WHERE run_id='saved-import'").get().saved_at,savedTime);assert.deepEqual(savedDb.prepare('SELECT box FROM report_ticks ORDER BY box').all().map(t=>t.box),[1,2]);savedDb.close();
   backup.reports[0].attachments[0].sha256='invalid';writeFileSync(fixture,JSON.stringify(backup));const invalid=spawnSync(process.execPath,['scripts/import.mjs',fixture],{env:{...process.env,FEED_DATA_DIR:join(migration,'data')},encoding:'utf8'});assert.notEqual(invalid.status,0);
  }finally{rmSync(migration,{recursive:true,force:true})}
- console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, Saved separate from favourites, ticks stored apart from the report, HTTP MCP, read tools off by default and loopback-only, comments and ticks only with one opened report, public door publish-only, restart persistence, upgrade with backup, migration replay and checksum rejection.');
+ console.log('PASS: login, forged identity denial, CSRF, static UI, publish-only keys for every source, instructions with origins and limits, full Markdown + attachment, retry deduplication/conflict, comments/archive, Saved separate from favourites, ticks stored apart from the report, HTTP MCP, read tools off by default and only on their own loopback door, comments and ticks only with one opened report, public door publish-only, restart persistence, upgrade with backup, migration replay and checksum rejection.');
 }finally{if(child)await stop();rmSync(data,{recursive:true,force:true})}

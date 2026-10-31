@@ -38,7 +38,7 @@ export async function publisher(request: Request): Promise<Publisher> {
   if (!key) throw new HttpError(401, 'This publishing key is invalid or has been revoked.');
   return key;
 }
-/** Reading needs both: the key's source on the allow list, and a request that came straight in on this Mac. */
+/** Reading needs both: the key's source on the allow list, and a request that came in on the read door. */
 export function canRead(key: Publisher) { return door.getStore() === 'loopback' && readSources.includes(key.source); }
 export function logRead(key: Publisher, tool: string, outcome: string) { console.log(`${new Date().toISOString()} read key=${key.id} source=${key.source} tool=${tool} outcome=${outcome}`); }
 // What an agent gets back: never the favourite flag or read state, which are the owner's own. Comments and ticks come only with one opened report.

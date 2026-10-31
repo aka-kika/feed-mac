@@ -5,7 +5,7 @@ import {createHmac,timingSafeEqual,scrypt as scryptCallback} from 'node:crypto';
 import {promisify} from 'node:util';
 import {Readable} from 'node:stream';
 import {text as readBody} from 'node:stream/consumers';
-import {auth,dataDir,door} from './storage.mjs';
+import {auth,dataDir,door,readPort,readSources} from './storage.mjs';
 import {api,mcp} from './routes.mjs';
 const scrypt=promisify(scryptCallback);
 const config=JSON.parse(readFileSync(join(dataDir,'config.json'),'utf8'));
@@ -14,9 +14,9 @@ const origin=new URL(config.origin).origin, port=config.port||4318;
 const publishOrigins=new Map((config.publishOrigins||[]).map(o=>{const u=new URL(o).origin;return [new URL(u).host,u]}));
 const publishPaths=['/api/publish','/api/mcp'];
 const allowed=new Set([new URL(origin).host,`127.0.0.1:${port}`,`localhost:${port}`,...publishOrigins.keys()]);
-// Reading answers only on a direct call on this Mac: a loopback Host and no sign of a proxy, so a tunnel or Tailscale that rewrites the Host still counts as outside.
+// Reading has its own door: a second listener on its own loopback port. The tunnel and the private network forward to the main port, so what comes in there is never trusted to read, whatever its Host says. The proxy headers are a second lock, for a forward pointed at the read port by mistake.
 const proxyHeaders=['cf-connecting-ip','cf-ray','cdn-loop','forwarded','via','x-forwarded-for','x-forwarded-host','x-forwarded-proto','x-real-ip','tailscale-funnel-request','tailscale-user-login'];
-const onLoopback=h=>[`127.0.0.1:${port}`,`localhost:${port}`].includes(h.host)&&!publishOrigins.has(h.host)&&!proxyHeaders.some(name=>h[name]!==undefined);
+const readHosts=new Set([`127.0.0.1:${readPort}`,`localhost:${readPort}`]);
 const sign=s=>createHmac('sha256',config.sessionSecret).update(s).digest('hex');
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 function session(h){const v=h.match(/(?:^|;\s*)feed_session=([^;]+)/)?.[1];if(!v)return false;const [expiry,sig]=v.split('.');return Number(expiry)>Date.now()&&equal(sig,sign(expiry));}
@@ -30,8 +30,17 @@ function publicAsset(pathname){
  return null;
 }
 let failures=0,blockedUntil=0;
+const sender=res=>(status,body,headers={})=>{res.writeHead(status,{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',...headers});res.end(body??undefined)};
+const pathTokenOf=(url,req)=>{const m=url.pathname.match(/^(\/api\/(?:mcp|publish))\/(feed_[a-f0-9]{64})$/);if(m){url.pathname=m[1];if(!req.headers.authorization)req.headers.authorization=`Bearer ${m[2]}`;}};
+async function callRoute(req,res,send,url,authenticated,doorName){
+ const h=new Headers();for(const [k,v]of Object.entries(req.headers))if(v!==undefined)h.set(k,Array.isArray(v)?v.join(','):v);
+ const request=new Request(url,{method:req.method,headers:h,...(!['GET','HEAD'].includes(req.method)?{body:Readable.toWeb(req),duplex:'half'}:{})});
+ const route=url.pathname==='/api/mcp'?mcp:api,handler=route[req.method];if(!handler)return send(405,'Method not allowed');
+ const response=await door.run(doorName,()=>auth.run(authenticated,()=>handler(request,{params:Promise.resolve({path:url.pathname.slice(5).split('/')})})));
+ res.writeHead(response.status,Object.fromEntries(response.headers));if(response.body)Readable.fromWeb(response.body).pipe(res);else res.end();
+}
 createServer(async(req,res)=>{
- const send=(status,body,headers={})=>{res.writeHead(status,{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',...headers});res.end(body??undefined)};
+ const send=sender(res);
  const file=(pathname,method)=>{
   const root=resolve('dist'),p=resolve(root,'.'+decodeURIComponent(pathname==='/'?'/index.html':pathname));
   if(!p.startsWith(root+'/')||!existsSync(p)||!statSync(p).isFile())return false;
@@ -43,8 +52,7 @@ createServer(async(req,res)=>{
   const url=new URL(req.url,base);
   if(url.origin!==base)return send(403,'Unknown origin',html);
   // Path-token form for clients with no header field (Grok web): /api/mcp/<key> or /api/publish/<key> becomes the bearer header.
-  const pathToken=url.pathname.match(/^(\/api\/(?:mcp|publish))\/(feed_[a-f0-9]{64})$/);
-  if(pathToken){url.pathname=pathToken[1];if(!req.headers.authorization)req.headers.authorization=`Bearer ${pathToken[2]}`;}
+  pathTokenOf(url,req);
   if(publishOrigins.has(req.headers.host)&&!publishPaths.includes(url.pathname))return send(404,'Not found',{'Content-Type':'text/plain; charset=utf-8'});
   if(req.headers.origin&&req.headers.origin!==base)return send(403,'Cross-origin request rejected',html);
   if(req.headers['sec-fetch-site']==='cross-site'&&req.method!=='GET'&&req.method!=='HEAD')return send(403,'Cross-site request rejected',html);
@@ -66,11 +74,7 @@ createServer(async(req,res)=>{
   if(url.pathname.startsWith('/api/')){
    const publishing=publishPaths.includes(url.pathname);
    if(!publishing&&!authenticated)return send(401,'{"error":"Please unlock Feed at /login."}',{'Content-Type':'application/json'});
-   const h=new Headers();for(const [k,v]of Object.entries(req.headers))if(v!==undefined)h.set(k,Array.isArray(v)?v.join(','):v);
-   const request=new Request(url,{method:req.method,headers:h,...(!['GET','HEAD'].includes(req.method)?{body:Readable.toWeb(req),duplex:'half'}:{})});
-   const route=url.pathname==='/api/mcp'?mcp:api,handler=route[req.method];if(!handler)return send(405,'Method not allowed');
-   const response=await door.run(onLoopback(req.headers)?'loopback':'outside',()=>auth.run(authenticated,()=>handler(request,{params:Promise.resolve({path:url.pathname.slice(5).split('/')})})));
-   res.writeHead(response.status,Object.fromEntries(response.headers));if(response.body)Readable.fromWeb(response.body).pipe(res);else res.end();return;
+   return await callRoute(req,res,send,url,authenticated,'outside');
   }
   const asset=publicAsset(url.pathname);
   if(asset&&['GET','HEAD'].includes(req.method)&&file(asset,req.method))return;
@@ -79,3 +83,19 @@ createServer(async(req,res)=>{
   if(!file(url.pathname,req.method))return send(404,'Not found',{'Content-Type':'text/plain; charset=utf-8'});
  }catch{send(500,'Request failed.',html);}
 }).listen(port,'127.0.0.1',()=>console.log(`Feed listening on loopback port ${port}.`));
+// The read door: the MCP path and nothing else, no session, no web pages. It opens only when a source may read, and if its port is taken reading stays shut while publishing carries on.
+const readDoor=createServer(async(req,res)=>{
+ const send=sender(res),text={'Content-Type':'text/plain; charset=utf-8'};
+ try{
+  if(!readHosts.has(req.headers.host))return send(403,'Unknown host',text);
+  if(req.headers.origin||req.headers['sec-fetch-site'])return send(403,'Browser requests are not allowed here.',text);
+  // Links in the answers point at the app on the main port, not at this door.
+  const base=`http://127.0.0.1:${port}`,url=new URL(req.url,base);
+  if(url.origin!==base)return send(403,'Unknown origin',text);
+  pathTokenOf(url,req);
+  if(url.pathname!=='/api/mcp')return send(404,'Not found',text);
+  await callRoute(req,res,send,url,false,proxyHeaders.some(name=>req.headers[name]!==undefined)?'outside':'loopback');
+ }catch{send(500,'Request failed.',text);}
+});
+readDoor.on('error',e=>console.error(`Reading is shut: the read door could not open on port ${readPort} (${e.code}).`));
+if(readSources.length)readDoor.listen(readPort,'127.0.0.1',()=>console.log(`Feed read door on loopback port ${readPort}.`));

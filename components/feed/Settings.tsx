@@ -47,7 +47,7 @@ export default function Settings({ palette, setPalette, theme, setTheme, onClose
       <details className="delivery-details"><summary>Connect an agent <ArrowUpRight size={15}/></summary>
       <p>Prepare instructions above, copy them, and paste them into your agent. The instructions include the credentials and ask the agent to send one connection-check report. A last-delivery time below its name confirms a report reached Feed.</p>
       <label>MCP endpoint<code className="endpoint">{origin}/api/mcp</code></label><label>HTTP endpoint<code className="endpoint">POST {origin}/api/publish</code></label>
-      <p>Each agent gets its own publishing key. It can submit reports but cannot read your reports or comments. The exception is a source you add to readSources in config.json on this Mac: its keys can open a report by ID, with your comments on it, and list Saved, on this Mac only, never your favourites. Revoke a key to stop that connection.</p><p>Existing keys cannot be displayed again. Prepare a new set of instructions if you need to reconnect, then revoke the old key when you no longer need it.</p>
+      <p>Each agent gets its own publishing key. It can submit reports but cannot read your reports or comments. The exception is a source you add to readSources in config.json on this Mac: its keys can open a report by ID, with your comments and ticks on it, and list Saved, on this Mac only, through the read address in their instructions, never your favourites. Revoke a key to stop that connection.</p><p>Existing keys cannot be displayed again. Prepare a new set of instructions if you need to reconnect, then revoke the old key when you no longer need it.</p>
       </details>
     </section>}
   </Modal>;

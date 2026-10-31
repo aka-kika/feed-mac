@@ -20,7 +20,7 @@ export async function POST(request: Request) {
       try { const result = await publish(key, input); return { content: [{ type: 'text', text: JSON.stringify({ ...result, url: reportUrl(request, result.id) }) }] }; }
       catch (error) { return { isError: true, content: [{ type: 'text', text: error instanceof HttpError ? error.message : 'Report could not be saved. Retry with the same run ID and payload.' }] }; }
     });
-    // The read tools do not exist for a key off the allow list or a request from outside this Mac, so there is nothing to call.
+    // The read tools do not exist for a key off the allow list or a request that did not come in on the read door, so there is nothing to call.
     if (canRead(key)) {
       server.registerTool('get_report', {
         description: `Read one report by its Feed ID, which the owner copies from a report's menu. Returns the full Markdown, the attachment names, the owner's comments on it as owner_notes, and the checkboxes the owner ticked as ticks, each with everything from its box up to the next box or heading. Read-only: it changes nothing, and agents cannot tick. ${DATA_NOTICE}`,

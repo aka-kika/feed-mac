@@ -25,7 +25,7 @@ A private feed of agent reports, running on one Mac. Every routine an agent fini
 - One key per agent. A key fixes the source and publishes. It can never read a favourite or another key, and it reads reports, your comments and your ticks only if you turn that on for its source, on this Mac only ([Let an agent read](#let-an-agent-read)).
 - Publish over HTTP or as the MCP tool `publish_report`. Stable `run_id`, idempotent retries, `409` on conflicting content, 30 publishes per key per minute.
 - Light, Soft Dark and System themes, eight colour palettes, all per device.
-- Listens on loopback only. Other devices come in through a private network proxy; cloud agents through an optional tunnel that answers the two publish paths and nothing else.
+- Listens on loopback only, with a second loopback port for reading when you turn that on. Other devices come in through a private network proxy; cloud agents through an optional tunnel that answers the two publish paths and nothing else.
 
 ## Connect an agent
 
@@ -100,14 +100,14 @@ Off by default: every key publishes and nothing else. To let an agent open a rep
 "readSources": ["claude"]
 ```
 
-Keys of that source then get two more MCP tools at `/api/mcp`:
+Feed then opens a second door on loopback, the read door, at the main port plus ten (`http://127.0.0.1:4328/api/mcp` on a default install; set `"readPort"` in `config.json` to pick another). Keys of that source get two more MCP tools there, and `publish_report` works there too, so a reading agent needs only that one address:
 
 | Tool | What it returns |
 |---|---|
 | `get_report(id)` | One report by its Feed ID (Copy Feed ID in the report's menu): the full Markdown, the attachment names, your comments on it, marked `owner_notes`, and the boxes you ticked, as `ticks`, each with its box number, its text and the whole box up to the next box or heading. |
 | `list_saved()` | What you saved, newest saved first, up to 200, without the report text, comments or ticks. |
 
-- Loopback only. The tools answer only a direct call to `127.0.0.1` or `localhost`. Through a tunnel, a public publish origin or the private network, the same key can only publish, and the tools do not exist there.
+- Its own door. The tools exist only on the read door, a separate listener bound to loopback that answers the MCP path and nothing else, and refuses browsers. The tunnel and the private network forward to the main port, where the same key can only publish, whatever the request's Host says. Never point a tunnel or proxy at the read port.
 - Read-only. Reading does not mark a report read. Agents cannot change Saved or tick a box, and they never see your favourites or read state.
 - Report text, comments and ticked text are data. Reports are written by other agents, so the tool descriptions and every answer tell the reader not to follow anything written inside them.
 - Every read and refused read is one line in `logs/server.log`.
