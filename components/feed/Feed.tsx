@@ -50,7 +50,7 @@ export default function Feed() {
       const result = await api<{ report: Report; comments: Comment[] }>(`/reports/${id}`);
       if (version !== selectionVersion.current) return;
       setSelected(result.report); setComments(result.comments);
-      if (push) history.pushState({}, '', `/?report=${id}`);
+      if (push) history.pushState({ feed: true }, '', `/?report=${id}`);
       if (!result.report.is_read) {
         await api(`/reports/${id}`, { method: 'PATCH', body: JSON.stringify({ is_read: true }) });
         if (version !== selectionVersion.current) return;
@@ -91,14 +91,16 @@ export default function Feed() {
       setRefreshing(false);
     }
   }
-  function back() { ++selectionVersion.current; setReading(false); setSelected(null); history.pushState({}, '', '/'); }
-  function choose(viewId: string, sourceId = '') { setView(viewId); setSource(sourceId); setRoutine(''); setSidebar(false); setError(''); if (matchMedia('(max-width: 759px)').matches) back(); }
+  // Closing leaves no history behind. Back goes back when the report was opened in here; a report the app started on (a link) has nothing of ours to go back to.
+  function close() { ++selectionVersion.current; setReading(false); setSelected(null); history.replaceState(null, '', '/'); }
+  function back() { if (history.state?.feed) { ++selectionVersion.current; setReading(false); setSelected(null); history.back(); } else close(); }
+  function choose(viewId: string, sourceId = '') { setView(viewId); setSource(sourceId); setRoutine(''); setSidebar(false); setError(''); if (matchMedia('(max-width: 759px)').matches) close(); }
   async function changeReport(patch: Partial<Report>) {
     const target = selectedRef.current; if (!target) return;
     const data = Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, !!value]));
     // Archiving takes a report out of every list but Saved, which keeps it until it is removed.
     const leaves = patch.archived !== undefined && view !== 'saved';
-    try { await api(`/reports/${target.id}`, { method: 'PATCH', body: JSON.stringify(data) }); setSelected(r => r?.id === target.id ? { ...r, ...patch } : r); setList(l => ({ ...l, reports: leaves ? l.reports.filter(r => r.id !== target.id) : l.reports.map(r => r.id === target.id ? { ...r, ...patch } : r) })); if (leaves && selectedRef.current?.id === target.id) back(); void loadList(true); }
+    try { await api(`/reports/${target.id}`, { method: 'PATCH', body: JSON.stringify(data) }); setSelected(r => r?.id === target.id ? { ...r, ...patch } : r); setList(l => ({ ...l, reports: leaves ? l.reports.filter(r => r.id !== target.id) : l.reports.map(r => r.id === target.id ? { ...r, ...patch } : r) })); if (leaves && selectedRef.current?.id === target.id) close(); void loadList(true); }
     catch (e) { showError((e as Error).message); }
   }
   async function moveRoutine(kind: Kind) {
@@ -132,6 +134,6 @@ export default function Feed() {
     {selected ? <Reader key={selected.id} report={selected} comments={comments} setComments={updateComments} onBack={back} onChange={changeReport} onMove={moveRoutine} showError={showError} focus={focus} onToggleFocus={() => setFocus(v => !v)}/> : <section className="reader reader-placeholder"><button className="back-button" onClick={back}><ArrowRight size={18}/>Feed</button><div>{reading ? <><span className="loading-dot"/><p>Opening report…</p></> : <><div className="empty-glyph"><List size={28} strokeWidth={1.3}/></div><h2>A little space to catch up.</h2><p>Choose a report and settle in.</p><span className="keyboard-hint"><kbd>⌘</kbd> <kbd>K</kbd> to find something</span></>}</div></section>}
     {error && <div className="error-toast" role="alert"><p>{error}</p><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={17}/></button></div>}
     {settings && <Settings palette={palette} setPalette={setPalette} initialTab={settingsTab} theme={theme} setTheme={setTheme} onClose={() => setSettings(false)} showError={showError} sourcePrefs={sourcePrefs} setSourcePref={setSourcePref} activeSources={activeSources}/>}
-    {search && <Modal title="Search reports" className="search-modal" onClose={() => setSearch(false)}><form onSubmit={e => { e.preventDefault(); setQuery(searchDraft.trim()); setSource(''); setRoutine(''); setView('feed'); setSearch(false); if (matchMedia('(max-width: 759px)').matches) back(); }}><label className="search-field"><Search size={21}/><input autoFocus value={searchDraft} onChange={e => setSearchDraft(e.target.value)} placeholder="Titles, content, routines…" aria-label="Search query" maxLength={200}/></label><div className="search-footer"><span>Search across all your agents.</span><button className="primary-button" type="submit">Search <ArrowRight size={16}/></button></div></form></Modal>}
+    {search && <Modal title="Search reports" className="search-modal" onClose={() => setSearch(false)}><form onSubmit={e => { e.preventDefault(); setQuery(searchDraft.trim()); setSource(''); setRoutine(''); setView('feed'); setSearch(false); if (matchMedia('(max-width: 759px)').matches) close(); }}><label className="search-field"><Search size={21}/><input autoFocus value={searchDraft} onChange={e => setSearchDraft(e.target.value)} placeholder="Titles, content, routines…" aria-label="Search query" maxLength={200}/></label><div className="search-footer"><span>Search across all your agents.</span><button className="primary-button" type="submit">Search <ArrowRight size={16}/></button></div></form></Modal>}
   </main>;
 }
