@@ -6,7 +6,7 @@ The scheduled routine must call publishing from the runtime that has both the FU
 
 Prefer the `publish_report` tool at `/api/mcp`, using Streamable HTTP and the Authorization header. Alternatively POST JSON to `/api/publish`.
 
-Required: `run_id`, `routine`, `title`, `markdown`. Optional: `published_at` (ISO timestamp with timezone), `attachments` (up to five `{name,type,base64}` files, 2 MB each, 5 MB total; request 8 MB). Omit `source`.
+Required: `run_id`, `routine`, `title`, `markdown`. Optional: `published_at` (ISO timestamp with timezone), `notify` (short text for the phone notification, up to 240 characters; without it the notification shows the routine name), `attachments` (up to five `{name,type,base64}` files, 2 MB each, 5 MB total; request 8 MB). Omit `source`.
 
 Use a stable ID for each actual routine run. Retain the exact JSON before sending and reuse it on retries. Send complete headings, prose, links, tables, lists, and code as Markdown. Label partial or failed research explicitly. Do not include credentials in the content or attachments.
 

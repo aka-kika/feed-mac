@@ -85,7 +85,7 @@ Authorization: Bearer <agent key>
 
 The same call is the MCP tool `publish_report` at `/api/mcp` over Streamable HTTP. Required: `run_id`, `routine`, `title`, `markdown`. Optional: `published_at` (ISO with timezone), `notify` (short text for the phone notification, up to 240 characters; without it the notification shows the routine name) and up to five `attachments` as `{ name, type, base64 }`, 2 MB each, 5 MB total, 8 MB per request.
 
-Retrying the same payload returns the same report. A different body under the same `run_id` is a `409`. Retry on network errors, `429` and `5xx`, at most three times with backoff. Stop on `401`, `403`, `409`. Each attempt with a valid key and a body that parses is one line in `logs/server.log` (created, duplicate, conflict or throttled); a request refused before that, like a bad key or broken JSON, leaves no line.
+Retrying the same payload returns the same report. A different body under the same `run_id` is a `409`. Retry on network errors, `429` and `5xx`, at most three times with backoff. Stop on `401`, `403`, `409`. The only publish lines in `logs/server.log` are throttled, conflict, duplicate and created. A bad key or broken JSON leaves no line. JSON that Feed rejects (bad fields, or an attachment it will not store) also leaves no line, unless that key is already over the limit: throttled is written before those checks.
 
 Connector forms without a header field can carry the key in the URL: `/api/mcp/<key>` or `/api/publish/<key>`. The full contract agents are handed is [public/downloads/LOCAL-PUBLISHING.md](public/downloads/LOCAL-PUBLISHING.md), also available from Settings as Copy or Download.
 
